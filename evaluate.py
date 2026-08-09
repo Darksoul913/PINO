@@ -101,10 +101,13 @@ def evaluate_pino_metrics(
     l_inf = float(np.max(np.abs(pred - ref)))
 
     # (d) Physical Conservation Law Metrics (Circulation & Enstrophy Energy)
-    # Circulation = Sum(u) * dx dy
-    circ_pred = np.sum(pred, axis=(-2, -1))
-    circ_ref = np.sum(ref, axis=(-2, -1))
-    circ_drift = float(np.mean(np.abs(circ_pred - circ_ref) / (np.abs(circ_ref) + 1e-8))) * 100.0
+    # Domain Circulation Omega = Integral(w) dx dy
+    circ_pred = np.mean(pred, axis=(-2, -1))
+    circ_ref = np.mean(ref, axis=(-2, -1))
+    ref_l1_norm = np.mean(np.abs(ref), axis=(-2, -1)) + 1e-8
+    
+    circ_abs_error = float(np.mean(np.abs(circ_pred - circ_ref)))
+    circ_drift = float(np.mean(np.abs(circ_pred - circ_ref) / ref_l1_norm)) * 100.0
 
     # Enstrophy Energy = Sum(u^2)
     energy_pred = np.sum(pred**2, axis=(-2, -1))
@@ -136,7 +139,8 @@ def evaluate_pino_metrics(
     print(f" Mean Absolute Error (MAE)        :  {mae:8.4f}        < 0.0500              ")
     print(f" Root Mean Squared Error (RMSE)   :  {rmse:8.4f}        < 0.0800              ")
     print(f" Max Point-wise Error (L_inf)     :  {l_inf:8.4f}        Local Gradient Peaks  ")
-    print(f" Circulation Invariant Drift      :  {circ_drift:6.2f} %        < 1.00 %              ")
+    print(f" Circulation Absolute Error (Abs) :  {circ_abs_error:8.6f}        < 1e-4                ")
+    print(f" Circulation Normalized Drift     :  {circ_drift:6.2f} %        < 1.00 %              ")
     print(f" Kinetic Energy / Enstrophy Drift :  {energy_drift:6.2f} %        < 1.00 %              ")
     print(f" Exact PDE Residual Norm ||P(u)|| :  {pde_res_norm:8.4f}        < 1e-2                ")
     print("--------------------------------------------------------------------------\n")
