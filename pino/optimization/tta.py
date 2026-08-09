@@ -1,7 +1,7 @@
 """
-Regularized Test-Time Adaptation (TTA) Engine for Out-of-Distribution (OOD) Physical Regimes.
-Fine-tunes PINO model weights at inference time using exact PDE residual minimization
-anchored against baseline operator state predictions to prevent unphysical trajectory drift.
+Regularized Test-Time Adaptation (TTA) Engine for PINO.
+Prevents trajectory drift using baseline spatial anchoring (alpha_anchor)
+and initial condition enforcement (beta_ic).
 """
 
 import torch
@@ -16,27 +16,24 @@ from pino.physics.pde_loss import PINOLossEngine
 class TestTimeAdapter:
     """
     Regularized Instance-Level Test-Time Adapter.
-    Updates PINO model parameters at inference time using:
-    L_TTA = L_pde + lambda_ic * L_ic + beta * ||u_TTA - u_0||^2
-    where u_0 is the baseline operator state prediction. This anchor constraint prevents
-    the TTA degeneracy paradox where unconstrained PDE optimization collapses physical energy dynamics.
+    L_TTA = L_pde + alpha_anchor * ||u_pred - u_base||^2 + beta_ic * ||u_pred(0) - a_input||^2
     """
 
     def __init__(
         self,
         model: PINO2D,
         loss_engine: PINOLossEngine,
-        learning_rate: float = 1e-4,
-        steps: int = 5,
-        ic_weight: float = 10.0,
-        anchor_weight: float = 5.0
+        learning_rate: float = 1e-5,
+        steps: int = 10,
+        alpha_anchor: float = 1.0,
+        beta_ic: float = 10.0
     ):
         self.model = model
         self.loss_engine = loss_engine
         self.lr = learning_rate
         self.steps = steps
-        self.ic_weight = ic_weight
-        self.anchor_weight = anchor_weight
+        self.alpha_anchor = alpha_anchor
+        self.beta_ic = beta_ic
 
     def adapt_instance(
         self,
@@ -46,20 +43,14 @@ class TestTimeAdapter:
     ) -> Tuple[torch.Tensor, Dict[str, float]]:
         """
         Adapts model on a single input instance.
-        Args:
-            x_input: Model input tensor (1, 3, s_x, s_y)
-            a_init: Initial state field (1, 1, s_x, s_y)
-            forcing: Optional forcing profile
-        Returns:
-            Tuple of (adapted_prediction, final_losses_dict)
         """
         self.model.eval()
 
-        # 1. Compute baseline un-adapted prediction u_0 as spatial anchor
+        # 1. Clone baseline prediction u_base as fixed anchor
         with torch.no_grad():
-            u_0 = self.model(x_input).detach().clone()
+            u_base = self.model(x_input).detach().clone()
 
-        # Optimizer targeting model parameters for instance adaptation
+        # Enable optimizer for model parameters
         optimizer = optim.Adam(self.model.parameters(), lr=self.lr)
 
         initial_loss = 0.0
@@ -69,23 +60,28 @@ class TestTimeAdapter:
             optimizer.zero_grad()
 
             # Forward pass
-            pred_u = self.model(x_input)  # (1, 1, s_x, s_y)
+            u_pred = self.model(x_input)  # (1, 1, s_x, s_y)
 
-            # Initial condition loss
-            l_ic = self.loss_engine.compute_ic_loss(pred_u, a_init)
+            # 1. Physics Residual Loss
+            # Form 2-step trajectory for PDE residual evaluation
+            pred_u_2step = u_pred.repeat(1, 2, 1, 1)
+            loss_pde = torch.mean(self.loss_engine.compute_pde_residual(pred_u_2step))
 
-            # Anchor loss against baseline operator prediction u_0
-            l_anchor = torch.mean((pred_u - u_0)**2)
+            # 2. Anchor Loss: Prevent drift from neural operator baseline
+            loss_anchor = torch.mean((u_pred - u_base) ** 2)
 
-            # Combined Regularized TTA loss
-            loss_tta = self.ic_weight * l_ic + self.anchor_weight * l_anchor
+            # 3. Initial Condition Loss: Enforce u(x,y,0) == a(x,y)
+            loss_ic = self.loss_engine.compute_ic_loss(u_pred, a_init)
 
-            loss_tta.backward()
+            # Total regularized TTA loss
+            total_tta_loss = loss_pde + self.alpha_anchor * loss_anchor + self.beta_ic * loss_ic
+
+            total_tta_loss.backward()
             optimizer.step()
 
             if step == 0:
-                initial_loss = loss_tta.item()
-            final_loss = loss_tta.item()
+                initial_loss = total_tta_loss.item()
+            final_loss = total_tta_loss.item()
 
         # Final adapted prediction
         with torch.no_grad():

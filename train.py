@@ -1,7 +1,8 @@
 """
 Two-Stage Physics-Informed Neural Operator (PINO) Training Pipeline.
-Stage 1 (Epochs 1-100): Data-focused spatial phase alignment (lambda_data=1.0, lambda_pde=0.001)
-Stage 2 (Epochs 101-200): Physics residual compliance ramp (lambda_pde -> 0.1)
+Phase 1 (Epochs 1-80): Heavy data loss & IC loss to master spatial phase alignment & vortex geometry.
+Phase 2 (Epochs 81-200): Physics residual ramp (lambda_pde 0.001 -> 0.1, lambda_ic 1.0 -> 10.0).
+Includes Gradient Clipping (max_norm=1.0) and Cosine Annealing LR Scheduler (1e-3 -> 1e-6).
 """
 
 import os
@@ -15,15 +16,15 @@ from pino.physics.pde_loss import PINOLossEngine
 from pino.dataset.pde_dataset import get_pde_dataloader
 
 
-def train_pino(config: PINOConfig = None, num_samples: int = 200, epochs: int = 200):
+def train_pino(config: PINOConfig = None, num_samples: int = 400, epochs: int = 200):
     """
-    Two-stage training loop for PINO.
+    Two-stage curriculum training loop for PINO with gradient clipping.
     """
     if config is None:
         config = PINOConfig()
 
     device = torch.device(config.device)
-    print(f"--- Starting Two-Stage PINO Training Pipeline on Device: {device} ({epochs} Epochs) ---")
+    print(f"--- Starting Two-Stage Curriculum PINO Training Pipeline on Device: {device} ({epochs} Epochs, {num_samples} Samples) ---")
 
     # 1. DataLoader with ground-truth reference data
     dataloader = get_pde_dataloader(
@@ -49,7 +50,7 @@ def train_pino(config: PINOConfig = None, num_samples: int = 200, epochs: int = 
     optimizer = optim.Adam(model.parameters(), lr=config.learning_rate)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs, eta_min=1e-6)
 
-    # 4. Training Loop with Two-Stage Loss Schedule
+    # 4. Training Loop with Two-Phase Loss Curriculum
     os.makedirs("checkpoints", exist_ok=True)
     best_loss = float("inf")
 
@@ -60,18 +61,22 @@ def train_pino(config: PINOConfig = None, num_samples: int = 200, epochs: int = 
         running_data_loss = 0.0
         running_pde_loss = 0.0
 
-        # Two-Stage Loss Schedule:
-        # Stage 1 (Epochs 1-100): lambda_pde = 0.001 (Spatial phase alignment & data learning)
-        # Stage 2 (Epochs 101-200): Gradually ramp lambda_pde up to 0.1 (Navier-Stokes physics enforcement)
-        if epoch <= 100:
+        # Two-Phase Curriculum Loss Schedule
+        if epoch <= 80:
+            # Phase 1: Heavy data loss to learn spatial phase alignment & vortex geometry
+            lambda_data = 1.0
             lambda_pde = 0.001
+            lambda_ic = 1.0
         else:
-            progress = (epoch - 100) / (epochs - 100)
-            lambda_pde = 0.001 + progress * (0.1 - 0.001)
+            # Phase 2: Gradually ramp up physics & IC loss to refine high-frequency boundaries
+            progress = (epoch - 80) / (epochs - 80)
+            lambda_data = 1.0
+            lambda_pde = 0.001 + progress * (0.1 - 0.001)  # Ramp to 0.1
+            lambda_ic = 1.0 + progress * 9.0               # Ramp to 10.0
 
         current_loss_config = LossConfig(
-            weight_data=1.0,
-            weight_ic=10.0,
+            weight_data=lambda_data,
+            weight_ic=lambda_ic,
             weight_pde=lambda_pde
         )
 
@@ -97,6 +102,9 @@ def train_pino(config: PINOConfig = None, num_samples: int = 200, epochs: int = 
 
             total_loss = loss_dict["loss_total"]
             total_loss.backward()
+
+            # Gradient clipping to prevent spectral explosion
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
 
             running_total_loss += total_loss.item()
@@ -114,7 +122,7 @@ def train_pino(config: PINOConfig = None, num_samples: int = 200, epochs: int = 
 
         if epoch % 10 == 0 or epoch == 1 or epoch == epochs:
             current_lr = scheduler.get_last_lr()[0]
-            print(f"Epoch [{epoch:03d}/{epochs:03d}] | Total: {avg_total:.4f} | IC: {avg_ic:.4f} | Data: {avg_data:.4f} | PDE (λ={lambda_pde:.3f}): {avg_pde:.4f} | LR: {current_lr:.2e}")
+            print(f"Epoch [{epoch:03d}/{epochs:03d}] | Total: {avg_total:.4f} | IC (λ={lambda_ic:.1f}): {avg_ic:.4f} | Data: {avg_data:.4f} | PDE (λ={lambda_pde:.3f}): {avg_pde:.4f} | LR: {current_lr:.2e}")
 
         if avg_total < best_loss:
             best_loss = avg_total
@@ -126,9 +134,9 @@ def train_pino(config: PINOConfig = None, num_samples: int = 200, epochs: int = 
                 "loss": best_loss
             }, "checkpoints/pino_best.pt")
 
-    print(f"\n--- Two-Stage Training Completed! Best Checkpoint Saved to 'checkpoints/pino_best.pt' (Loss: {best_loss:.4f}) ---")
+    print(f"\n--- Two-Stage Curriculum Training Completed! Best Checkpoint Saved to 'checkpoints/pino_best.pt' (Loss: {best_loss:.4f}) ---")
     return model
 
 
 if __name__ == "__main__":
-    train_pino(num_samples=200, epochs=200)
+    train_pino(num_samples=400, epochs=200)
