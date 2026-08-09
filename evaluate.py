@@ -80,7 +80,7 @@ def evaluate_pino_metrics(
             # Reset model weights to trained checkpoint before adapting instance i
             if initial_state_dict is not None:
                 model.load_state_dict(initial_state_dict)
-            adapter = TestTimeAdapter(model, loss_engine, steps=5, learning_rate=1e-4, anchor_weight=5.0)
+            adapter = TestTimeAdapter(model, loss_engine, steps=10, learning_rate=1e-5, alpha_anchor=1.0, beta_ic=10.0)
             pred_i, _ = adapter.adapt_instance(x_i, a_i)
         else:
             with torch.no_grad():
