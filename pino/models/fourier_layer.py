@@ -4,9 +4,13 @@ Computes frequency-domain mode filtering, complex weight tensor multiplication,
 and inverse FFT with zero-shot resolution invariance.
 """
 
+import warnings
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+# Suppress PyTorch internal ATen MPS backend deprecation warning for internal FFT buffer resizing
+warnings.filterwarnings("ignore", category=UserWarning, message=".*resized since it had shape.*")
 
 
 class SpectralConv2d(nn.Module):
@@ -60,7 +64,7 @@ class SpectralConv2d(nn.Module):
 
         # 1. 2D Real Fast Fourier Transform (rfft2)
         # x_ft shape: (batch, in_channels, s_x, s_y // 2 + 1)
-        x_ft = torch.fft.rfft2(x)
+        x_ft = torch.fft.rfft2(x.contiguous())
 
         # 2. Allocate output frequency tensor for target resolution
         out_ft = torch.zeros(
@@ -79,7 +83,7 @@ class SpectralConv2d(nn.Module):
         )
 
         # 4. Inverse 2D Real Fast Fourier Transform (irfft2)
-        x_spectral = torch.fft.irfft2(out_ft, s=(out_s_x, out_s_y))
+        x_spectral = torch.fft.irfft2(out_ft.contiguous(), s=(out_s_x, out_s_y))
 
         # 5. Spatial residual shortcut W(x)
         if (out_s_x, out_s_y) != (s_x, s_y):
