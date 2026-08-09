@@ -47,6 +47,13 @@ def visualize_pino_fields(
 
     # 4. Run PINO Model (Standard & Zero-Shot Super-Resolution)
     model = PINO2D.from_config(config.model).to(device)
+    checkpoint_path = "checkpoints/pino_best.pt"
+    if os.path.exists(checkpoint_path):
+        checkpoint = torch.load(checkpoint_path, map_location=device)
+        model.load_state_dict(checkpoint["model_state_dict"])
+        print(f"[*] Loaded trained model checkpoint from '{checkpoint_path}' (Loss: {checkpoint.get('loss', 0.0):.4f})")
+    else:
+        print("[!] Warning: No trained checkpoint found in 'checkpoints/pino_best.pt'. Using untrained initial weights.")
     model.eval()
 
     with torch.no_grad():

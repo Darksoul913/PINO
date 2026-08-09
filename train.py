@@ -21,7 +21,7 @@ def train_pino(config: PINOConfig = None, num_samples: int = 50, epochs: int = 5
     if config is None:
         config = PINOConfig()
 
-    device = torch.device(config.device if torch.cuda.is_available() else "cpu")
+    device = torch.device(config.device)
     print(f"--- Starting PINO Training Pipeline on Device: {device} ---")
 
     # 1. DataLoader
@@ -31,6 +31,7 @@ def train_pino(config: PINOConfig = None, num_samples: int = 50, epochs: int = 5
         s_x=config.domain.s_x,
         s_y=config.domain.s_y,
         shuffle=True,
+        generate_reference_data=True,
         device=str(device)
     )
 
@@ -55,6 +56,7 @@ def train_pino(config: PINOConfig = None, num_samples: int = 50, epochs: int = 5
         model.train()
         running_total_loss = 0.0
         running_ic_loss = 0.0
+        running_data_loss = 0.0
         running_pde_loss = 0.0
 
         for batch in dataloader:
@@ -62,7 +64,7 @@ def train_pino(config: PINOConfig = None, num_samples: int = 50, epochs: int = 5
             a_init = batch["a_init"].to(device)     # (batch, 1, s_x, s_y)
             target = batch.get("target", None)
             if target is not None:
-                target = target.to(device)
+                target = target[:, -1:].to(device)   # Match final snapshot shape (batch, 1, s_x, s_y)
 
             optimizer.zero_grad()
 
@@ -83,6 +85,7 @@ def train_pino(config: PINOConfig = None, num_samples: int = 50, epochs: int = 5
 
             running_total_loss += total_loss.item()
             running_ic_loss += loss_dict["loss_ic"].item()
+            running_data_loss += loss_dict["loss_data"].item()
             running_pde_loss += loss_dict["loss_pde"].item()
 
         scheduler.step()
@@ -90,9 +93,10 @@ def train_pino(config: PINOConfig = None, num_samples: int = 50, epochs: int = 5
         num_batches = len(dataloader)
         avg_total = running_total_loss / num_batches
         avg_ic = running_ic_loss / num_batches
+        avg_data = running_data_loss / num_batches
         avg_pde = running_pde_loss / num_batches
 
-        print(f"Epoch [{epoch:02d}/{epochs:02d}] | Total Loss: {avg_total:.4f} | IC Loss: {avg_ic:.4f} | PDE Loss: {avg_pde:.4f}")
+        print(f"Epoch [{epoch:02d}/{epochs:02d}] | Total Loss: {avg_total:.4f} | IC: {avg_ic:.4f} | Data: {avg_data:.4f} | PDE: {avg_pde:.4f}")
 
         if avg_total < best_loss:
             best_loss = avg_total
@@ -109,4 +113,4 @@ def train_pino(config: PINOConfig = None, num_samples: int = 50, epochs: int = 5
 
 
 if __name__ == "__main__":
-    train_pino(epochs=3)
+    train_pino(num_samples=100, epochs=20)
