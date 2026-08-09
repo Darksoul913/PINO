@@ -5,6 +5,7 @@ Energy Invariant Conservation, and Exact Spectral PDE Residual Norms.
 """
 
 import os
+import copy
 import torch
 import numpy as np
 from typing import Dict
@@ -56,7 +57,9 @@ def evaluate_pino_metrics(
     grf = GaussianRandomField2D(s_x=s_x, s_y=s_y, length_scale=0.5, alpha=2.5, device=device)
     solver = NavierStokes2DSolver(s_x=s_x, s_y=s_y, viscosity=config.pde.viscosity, device=device)
     loss_engine = PINOLossEngine(s_x=s_x, s_y=s_y, viscosity=config.pde.viscosity, device=device)
-    adapter = TestTimeAdapter(model, loss_engine, steps=30, learning_rate=1e-3) if use_tta else None
+
+    # Save initial checkpoint state_dict for clean per-instance TTA resets
+    initial_state_dict = copy.deepcopy(model.state_dict()) if os.path.exists(checkpoint_path) else None
 
     # 3. Generate Test Samples and Compute Predictions
     w0_all = grf.sample(num_samples=num_test_samples)
@@ -74,6 +77,10 @@ def evaluate_pino_metrics(
         x_i = x_inputs[i:i+1]
         a_i = w0_all[i:i+1].unsqueeze(1)
         if use_tta:
+            # Reset model weights to trained checkpoint before adapting instance i
+            if initial_state_dict is not None:
+                model.load_state_dict(initial_state_dict)
+            adapter = TestTimeAdapter(model, loss_engine, steps=5, learning_rate=1e-4, anchor_weight=5.0)
             pred_i, _ = adapter.adapt_instance(x_i, a_i)
         else:
             with torch.no_grad():
