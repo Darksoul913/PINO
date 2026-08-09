@@ -16,14 +16,19 @@ from pino.dataset.grf import GaussianRandomField2D
 from pino.dataset.reference_solver import NavierStokes2DSolver
 
 
+from pino.optimization.tta import TestTimeAdapter
+
+
 def evaluate_pino_metrics(
     checkpoint_path: str = "checkpoints/pino_best.pt",
     num_test_samples: int = 20,
     s_x: int = 64,
-    s_y: int = 64
+    s_y: int = 64,
+    use_tta: bool = False
 ) -> Dict[str, float]:
     """
     Computes exact quantitative metrics across test dataset instances.
+    Optionally applies Test-Time Adaptation (TTA) to reduce high-gradient boundary residuals.
     """
     config = PINOConfig()
     device = config.device
@@ -33,7 +38,8 @@ def evaluate_pino_metrics(
     print("==========================================================================\n")
     print(f"[*] Target Compute Device: {device.upper()}")
     print(f"[*] Test Dataset Size: {num_test_samples} independent GRF samples")
-    print(f"[*] Spatial Resolution: {s_x} x {s_y}\n")
+    print(f"[*] Spatial Resolution: {s_x} x {s_y}")
+    print(f"[*] Test-Time Adaptation (TTA): {'ENABLED (30 steps)' if use_tta else 'DISABLED'}\n")
 
     # 1. Instantiate Model and Load Checkpoint
     model = PINO2D.from_config(config.model).to(device)
@@ -50,6 +56,7 @@ def evaluate_pino_metrics(
     grf = GaussianRandomField2D(s_x=s_x, s_y=s_y, length_scale=0.5, alpha=2.5, device=device)
     solver = NavierStokes2DSolver(s_x=s_x, s_y=s_y, viscosity=config.pde.viscosity, device=device)
     loss_engine = PINOLossEngine(s_x=s_x, s_y=s_y, viscosity=config.pde.viscosity, device=device)
+    adapter = TestTimeAdapter(model, loss_engine, steps=30, learning_rate=1e-3) if use_tta else None
 
     # 3. Generate Test Samples and Compute Predictions
     w0_all = grf.sample(num_samples=num_test_samples)
@@ -62,8 +69,18 @@ def evaluate_pino_metrics(
 
     x_inputs = torch.cat([grid, w0_all.unsqueeze(1)], dim=1).to(device)
 
-    with torch.no_grad():
-        u_pred_all = model(x_inputs).squeeze(1)  # (N, s_x, s_y)
+    u_pred_list = []
+    for i in range(num_test_samples):
+        x_i = x_inputs[i:i+1]
+        a_i = w0_all[i:i+1].unsqueeze(1)
+        if use_tta:
+            pred_i, _ = adapter.adapt_instance(x_i, a_i)
+        else:
+            with torch.no_grad():
+                pred_i = model(x_i)
+        u_pred_list.append(pred_i.squeeze(0))
+
+    u_pred_all = torch.cat(u_pred_list, dim=0)  # (N, s_x, s_y)
 
     # Convert to NumPy for metrics
     pred = u_pred_all.cpu().numpy()
@@ -128,4 +145,7 @@ def evaluate_pino_metrics(
 
 
 if __name__ == "__main__":
-    evaluate_pino_metrics()
+    print("\n--- RUNNING BASELINE MODEL EVALUATION ---")
+    evaluate_pino_metrics(use_tta=False)
+    print("\n--- RUNNING TTA-ENHANCED MODEL EVALUATION ---")
+    evaluate_pino_metrics(use_tta=True)

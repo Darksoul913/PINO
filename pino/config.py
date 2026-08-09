@@ -36,8 +36,8 @@ class ModelConfig:
     in_channels: int = 3           # Input channels: (x, y, a(x))
     out_channels: int = 1          # Output state field (e.g. vorticity or velocity)
     hidden_dim: int = 64           # Lifting width dv
-    modes1: int = 16               # Number of Fourier modes in x-dimension (k_max_x)
-    modes2: int = 16               # Number of Fourier modes in y-dimension (k_max_y)
+    modes1: int = 24               # Number of Fourier modes in x-dimension (k_max_x)
+    modes2: int = 24               # Number of Fourier modes in y-dimension (k_max_y)
     num_layers: int = 4            # Number of stacked Spectral Conv layers
     padding: int = 8               # Non-periodic boundary padding (if needed)
 
@@ -46,7 +46,7 @@ class ModelConfig:
 class LossConfig:
     """Multi-Objective Physics and Data Loss Weights."""
     weight_data: float = 1.0       # Weight for data loss L_data
-    weight_pde: float = 1.0        # Weight for physics residual loss L_pde
+    weight_pde: float = 5.0        # Weight for physics residual loss L_pde (increased for high-gradient boundary physics)
     weight_ic: float = 10.0        # Weight for initial condition loss L_ic/bc
     use_dealiasing: bool = True    # Apply Orszag 3/2 rule for non-linear terms
 
