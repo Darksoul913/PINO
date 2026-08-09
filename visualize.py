@@ -49,7 +49,7 @@ def visualize_pino_fields(
     model = PINO2D.from_config(config.model).to(device)
     checkpoint_path = "checkpoints/pino_best.pt"
     if os.path.exists(checkpoint_path):
-        checkpoint = torch.load(checkpoint_path, map_location=device)
+        checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
         model.load_state_dict(checkpoint["model_state_dict"])
         print(f"[*] Loaded trained model checkpoint from '{checkpoint_path}' (Loss: {checkpoint.get('loss', 0.0):.4f})")
     else:
