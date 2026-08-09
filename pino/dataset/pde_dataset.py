@@ -39,8 +39,8 @@ class PDEDataset2D(Dataset):
         self.initial_conditions = grf.sample(num_samples=num_samples)
 
         # 2. Build 2D Spatial Grid Coordinates [0, 2π]
-        x = torch.linspace(0, 2 * 3.141592653589793, s_x, device=device)
-        y = torch.linspace(0, 2 * 3.141592653589793, s_y, device=device)
+        x = torch.linspace(0, 2 * 3.141592653589793 * (s_x - 1) / s_x, s_x, device=device)
+        y = torch.linspace(0, 2 * 3.141592653589793 * (s_y - 1) / s_y, s_y, device=device)
         grid_x, grid_y = torch.meshgrid(x, y, indexing="ij")
         # Shape: (2, s_x, s_y)
         self.grid = torch.stack([grid_x, grid_y], dim=0)
