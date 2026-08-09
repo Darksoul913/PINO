@@ -27,7 +27,7 @@ class TestTimeAdapter:
         model: PINO2D,
         loss_engine: PINOLossEngine,
         learning_rate: float = 1e-4,
-        steps: int = 10,
+        steps: int = 5,
         ic_weight: float = 10.0,
         anchor_weight: float = 5.0
     ):

@@ -1,7 +1,7 @@
 """
-End-to-End Physics-Informed Neural Operator (PINO) Training Pipeline.
-Uses Dynamic Physics Loss Weight Scheduling (Data-first -> Physics-ramp)
-across extended epochs for low-error convergence (< 0.05).
+Two-Stage Physics-Informed Neural Operator (PINO) Training Pipeline.
+Stage 1 (Epochs 1-100): Data-focused spatial phase alignment (lambda_data=1.0, lambda_pde=0.001)
+Stage 2 (Epochs 101-200): Physics residual compliance ramp (lambda_pde -> 0.1)
 """
 
 import os
@@ -15,15 +15,15 @@ from pino.physics.pde_loss import PINOLossEngine
 from pino.dataset.pde_dataset import get_pde_dataloader
 
 
-def train_pino(config: PINOConfig = None, num_samples: int = 150, epochs: int = 100):
+def train_pino(config: PINOConfig = None, num_samples: int = 200, epochs: int = 200):
     """
-    Main training loop for PINO with dynamic physics loss weighting.
+    Two-stage training loop for PINO.
     """
     if config is None:
         config = PINOConfig()
 
     device = torch.device(config.device)
-    print(f"--- Starting PINO Training Pipeline on Device: {device} ({epochs} Epochs) ---")
+    print(f"--- Starting Two-Stage PINO Training Pipeline on Device: {device} ({epochs} Epochs) ---")
 
     # 1. DataLoader with ground-truth reference data
     dataloader = get_pde_dataloader(
@@ -45,11 +45,11 @@ def train_pino(config: PINOConfig = None, num_samples: int = 150, epochs: int = 
         device=str(device)
     )
 
-    # 3. Optimizer & Cosine Annealing Scheduler
+    # 3. Optimizer & Cosine Annealing Scheduler (decay 1e-3 -> 1e-6)
     optimizer = optim.Adam(model.parameters(), lr=config.learning_rate)
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs, eta_min=1e-5)
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs, eta_min=1e-6)
 
-    # 4. Training Loop with Dynamic Physics Loss Scheduling
+    # 4. Training Loop with Two-Stage Loss Schedule
     os.makedirs("checkpoints", exist_ok=True)
     best_loss = float("inf")
 
@@ -60,14 +60,14 @@ def train_pino(config: PINOConfig = None, num_samples: int = 150, epochs: int = 
         running_data_loss = 0.0
         running_pde_loss = 0.0
 
-        # Dynamic Loss Weight Schedule:
-        # Epochs 1-30: lambda_pde = 0.01 (Establish global spatial features)
-        # Epochs 31-100: Linearly ramp lambda_pde up to 1.0 (Enforce physical conservation)
-        if epoch <= 30:
-            lambda_pde = 0.01
+        # Two-Stage Loss Schedule:
+        # Stage 1 (Epochs 1-100): lambda_pde = 0.001 (Spatial phase alignment & data learning)
+        # Stage 2 (Epochs 101-200): Gradually ramp lambda_pde up to 0.1 (Navier-Stokes physics enforcement)
+        if epoch <= 100:
+            lambda_pde = 0.001
         else:
-            progress = (epoch - 30) / (epochs - 30)
-            lambda_pde = 0.01 + progress * (1.0 - 0.01)
+            progress = (epoch - 100) / (epochs - 100)
+            lambda_pde = 0.001 + progress * (0.1 - 0.001)
 
         current_loss_config = LossConfig(
             weight_data=1.0,
@@ -112,8 +112,9 @@ def train_pino(config: PINOConfig = None, num_samples: int = 150, epochs: int = 
         avg_data = running_data_loss / num_batches
         avg_pde = running_pde_loss / num_batches
 
-        if epoch % 5 == 0 or epoch == 1 or epoch == epochs:
-            print(f"Epoch [{epoch:03d}/{epochs:03d}] | Total: {avg_total:.4f} | IC: {avg_ic:.4f} | Data: {avg_data:.4f} | PDE (λ={lambda_pde:.2f}): {avg_pde:.4f}")
+        if epoch % 10 == 0 or epoch == 1 or epoch == epochs:
+            current_lr = scheduler.get_last_lr()[0]
+            print(f"Epoch [{epoch:03d}/{epochs:03d}] | Total: {avg_total:.4f} | IC: {avg_ic:.4f} | Data: {avg_data:.4f} | PDE (λ={lambda_pde:.3f}): {avg_pde:.4f} | LR: {current_lr:.2e}")
 
         if avg_total < best_loss:
             best_loss = avg_total
@@ -125,9 +126,9 @@ def train_pino(config: PINOConfig = None, num_samples: int = 150, epochs: int = 
                 "loss": best_loss
             }, "checkpoints/pino_best.pt")
 
-    print(f"\n--- Training Completed! Best Checkpoint Saved to 'checkpoints/pino_best.pt' (Loss: {best_loss:.4f}) ---")
+    print(f"\n--- Two-Stage Training Completed! Best Checkpoint Saved to 'checkpoints/pino_best.pt' (Loss: {best_loss:.4f}) ---")
     return model
 
 
 if __name__ == "__main__":
-    train_pino(num_samples=150, epochs=100)
+    train_pino(num_samples=200, epochs=200)
