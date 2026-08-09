@@ -3,6 +3,7 @@ Central Configuration System for PINO Framework.
 Provides strongly-typed dataclasses for hyperparameter and PDE problem settings.
 """
 
+import torch
 from dataclasses import dataclass, field
 from typing import Tuple
 
@@ -50,6 +51,16 @@ class LossConfig:
     use_dealiasing: bool = True    # Apply Orszag 3/2 rule for non-linear terms
 
 
+
+def get_default_device() -> str:
+    """Helper function to auto-detect available GPU accelerator (MPS for Apple Silicon, CUDA, or CPU)."""
+    if torch.cuda.is_available():
+        return "cuda"
+    elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
 @dataclass
 class PINOConfig:
     """Master configuration container for PINO."""
@@ -57,7 +68,7 @@ class PINOConfig:
     pde: PDEConfig = field(default_factory=PDEConfig)
     model: ModelConfig = field(default_factory=ModelConfig)
     loss: LossConfig = field(default_factory=LossConfig)
-    device: str = "cuda"           # Target compute device ("cuda", "mps", or "cpu")
+    device: str = field(default_factory=get_default_device)  # Auto-detected target compute device
     batch_size: int = 8
     learning_rate: float = 1e-3
     epochs: int = 100

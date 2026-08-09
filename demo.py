@@ -21,7 +21,8 @@ def run_pino_demo():
     print("      PHYSICS-INFORMED NEURAL OPERATOR (PINO) FRAMEWORK DEMO             ")
     print("==========================================================================\n")
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    config = PINOConfig()
+    device = config.device
     print(f"[*] Target Compute Hardware Device: {device.upper()}\n")
 
     # 1. Initialize GRF Sampler & Generate Initial Condition Field
@@ -41,7 +42,6 @@ def run_pino_demo():
 
     # 3. PINO Model Forward Pass & Zero-Shot Super-Resolution
     print("--- STEP 3: PINO Model & Zero-Shot Super-Resolution (64x64 -> 256x256) ---")
-    config = PINOConfig()
     model = PINO2D.from_config(config.model).to(device)
 
     # Prepare 64x64 grid input
