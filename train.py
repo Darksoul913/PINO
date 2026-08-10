@@ -3,15 +3,11 @@ Pure Data-Driven Fourier Neural Operator (FNO) Training Pipeline.
 Standard approach from Li et al. (2021): learns the operator mapping a(x,y) → u(x,y,T).
 
 Achieves < 2.50% Relative L2 Error on 2D Navier-Stokes benchmark.
-Key features:
-1. Normalizes spatial grid channels [0, 2π] → [0, 1].
-2. MSE training loss for fast & stable convergence (2.44% Rel-L2 at 100 epochs).
-3. Complex-safe global gradient norm clipping (max_norm = 1.0) on PyTorch MPS backend.
-4. AdamW (lr=1e-3, weight_decay=1e-4) + CosineAnnealingLR (eta_min=1e-6).
 """
 
 import os
 import math
+import time
 import torch
 import torch.optim as optim
 
@@ -58,21 +54,40 @@ def normalize_grid(x_input: torch.Tensor) -> torch.Tensor:
     return x_out
 
 
-def train_pino(config: PINOConfig = None, num_samples: int = 1000, epochs: int = 100):
+def relative_l2(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
     """
-    Pure data-driven FNO training loop achieving < 2.50% Rel-L2 error.
+    Computes relative L2 error norm across batch.
+    """
+    diff_norms = torch.norm(pred - target, p=2, dim=(-2, -1))
+    target_norms = torch.norm(target, p=2, dim=(-2, -1)) + 1e-8
+    return torch.mean(diff_norms / target_norms)
+
+
+def train_pino(
+    config: PINOConfig = None,
+    num_samples: int = 1000,
+    epochs: int = 100,
+    batch_size: int = None,
+    lr: float = None
+):
+    """
+    Data-Driven FNO training loop with timing diagnostics and state checkpointing.
     """
     if config is None:
         config = PINOConfig()
 
     device = torch.device(config.device)
-    lr = config.learning_rate  # 1e-3
-    print(f"--- Pure Data-Driven FNO Training on Device: {device} ({epochs} Epochs, {num_samples} Samples, lr={lr}) ---")
+    
+    # Allow overrides from arguments, falling back to config
+    batch_size = batch_size if batch_size is not None else config.batch_size
+    lr = lr if lr is not None else config.learning_rate
 
-    # 1. DataLoader with ground-truth reference trajectories
+    print(f"\n--- FNO Training Pipeline on Device: {device} ({epochs} Epochs, N={num_samples}, Batch Size {batch_size}, LR {lr}) ---", flush=True)
+
+    # 1. DataLoader
     dataloader = get_pde_dataloader(
         num_samples=num_samples,
-        batch_size=config.batch_size,
+        batch_size=batch_size,
         s_x=config.domain.s_x,
         s_y=config.domain.s_y,
         shuffle=True,
@@ -80,25 +95,22 @@ def train_pino(config: PINOConfig = None, num_samples: int = 1000, epochs: int =
         device=str(device)
     )
 
-    # 2. Model
+    # 2. Model Initialization
     model = PINO2D.from_config(config.model).to(device)
     total_params = sum(p.numel() for p in model.parameters())
-    print(f"[*] Model Parameters: {total_params:,}")
+    print(f"[*] Model Parameters: {total_params:,}", flush=True)
 
-    # 3. Relative L2 metric function
-    def relative_l2(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        diff_norms = torch.norm(pred - target, p=2, dim=(-2, -1))
-        target_norms = torch.norm(target, p=2, dim=(-2, -1)) + 1e-8
-        return torch.mean(diff_norms / target_norms)
-
-    # 4. AdamW Optimizer & Cosine Annealing Scheduler
+    # 3. Optimizer & Scheduler
     optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs, eta_min=1e-6)
 
     os.makedirs("checkpoints", exist_ok=True)
     best_rel_l2 = float("inf")
 
-    # 5. Training Loop
+    # Start Diagnostic Benchmark Timer (from test.py behavior)
+    start_time = time.time()
+
+    # 4. Training Loop
     for epoch in range(1, epochs + 1):
         model.train()
         running_mse = 0.0
@@ -111,7 +123,7 @@ def train_pino(config: PINOConfig = None, num_samples: int = 1000, epochs: int =
 
             optimizer.zero_grad()
 
-            pred_u = model(x_input)  # (batch, 1, s_x, s_y)
+            pred_u = model(x_input)
             loss = torch.mean((pred_u - target) ** 2)
 
             loss.backward()
@@ -128,6 +140,7 @@ def train_pino(config: PINOConfig = None, num_samples: int = 1000, epochs: int =
         avg_mse = running_mse / max(num_batches, 1)
         avg_rel = running_rel / max(num_batches, 1)
 
+        # Checkpointing Best Model
         if avg_rel < best_rel_l2:
             best_rel_l2 = avg_rel
             torch.save({
@@ -140,11 +153,18 @@ def train_pino(config: PINOConfig = None, num_samples: int = 1000, epochs: int =
 
         if epoch % 10 == 0 or epoch == 1 or epoch == epochs:
             current_lr = scheduler.get_last_lr()[0]
-            print(f"Epoch [{epoch:03d}/{epochs:03d}] | MSE: {avg_mse:.6f} | Rel-L2: {avg_rel*100:.2f}% (Best: {best_rel_l2*100:.2f}%) | LR: {current_lr:.2e}")
+            print(
+                f"  Epoch [{epoch:03d}/{epochs:03d}] | "
+                f"MSE: {avg_mse:.6f} | "
+                f"Rel-L2: {avg_rel*100:.2f}% (Best: {best_rel_l2*100:.2f}%) | "
+                f"LR: {current_lr:.2e}",
+                flush=True
+            )
 
-    print(f"\n--- Training Complete! Best Checkpoint Saved to 'checkpoints/pino_best.pt' (Rel-L2: {best_rel_l2*100:.2f}%) ---")
+    elapsed_time = time.time() - start_time
+    print(f"\n--- Training Complete in {elapsed_time:.1f}s! Best Checkpoint Saved to 'checkpoints/pino_best.pt' (Rel-L2: {best_rel_l2*100:.2f}%) ---", flush=True)
     return model
 
 
 if __name__ == "__main__":
-    train_pino(num_samples=1000, epochs=100)
+    train_pino(num_samples=1000, epochs=100, batch_size=16, lr=1e-3)
