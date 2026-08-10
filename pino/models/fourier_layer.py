@@ -28,8 +28,8 @@ class SpectralConv2d(nn.Module):
         self.modes1 = modes1  # k_max in x-dimension
         self.modes2 = modes2  # k_max in y-dimension
 
-        # Scale factor for weight initialization
-        scale = 1.0 / (in_channels * out_channels)
+        # Scale factor for weight initialization (Kaiming variance matching over in_channels)
+        scale = 1.0 / (in_channels ** 0.5)
 
         # Complex weights for top-left (positive x, positive y) Fourier modes
         self.weights1 = nn.Parameter(
