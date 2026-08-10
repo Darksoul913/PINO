@@ -33,11 +33,11 @@ class SpectralConv2d(nn.Module):
 
         # Complex weights for top-left (positive x, positive y) Fourier modes
         self.weights1 = nn.Parameter(
-            scale * torch.rand(in_channels, out_channels, self.modes1, self.modes2, dtype=torch.cfloat)
+            scale * torch.randn(in_channels, out_channels, self.modes1, self.modes2, dtype=torch.cfloat)
         )
         # Complex weights for bottom-left (negative x, positive y) Fourier modes
         self.weights2 = nn.Parameter(
-            scale * torch.rand(in_channels, out_channels, self.modes1, self.modes2, dtype=torch.cfloat)
+            scale * torch.randn(in_channels, out_channels, self.modes1, self.modes2, dtype=torch.cfloat)
         )
 
         # Local spatial convolution shortcut W (1x1 conv)

@@ -65,6 +65,7 @@ def train_pino(config: PINOConfig = None, num_samples: int = 1000, epochs: int =
     if config is None:
         config = PINOConfig()
 
+    torch.manual_seed(42)
     device = torch.device(config.device)
     lr = config.learning_rate  # 1e-3
     print(f"--- Pure Data-Driven FNO Training on Device: {device} ({epochs} Epochs, {num_samples} Samples, lr={lr}) ---")
