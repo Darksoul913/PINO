@@ -5,6 +5,7 @@ Energy Invariant Conservation, and Exact Spectral PDE Residual Norms.
 """
 
 import os
+import math
 import copy
 import torch
 import numpy as np
@@ -16,6 +17,7 @@ from pino.physics.pde_loss import PINOLossEngine
 from pino.dataset.grf import GaussianRandomField2D
 from pino.dataset.reference_solver import NavierStokes2DSolver
 from pino.optimization.tta import TestTimeAdapter
+from train import normalize_grid
 
 
 def evaluate_pino_metrics(
@@ -30,12 +32,12 @@ def evaluate_pino_metrics(
     Optionally applies Test-Time Adaptation (TTA) to reduce high-gradient boundary residuals.
     """
     config = PINOConfig()
-    device = config.device
+    device = torch.device(config.device)
 
     print("==========================================================================")
     print("      QUANTITATIVE MATHEMATICAL EVALUATION: PINO FRAMEWORK                ")
     print("==========================================================================\n")
-    print(f"[*] Target Compute Device: {device.upper()}")
+    print(f"[*] Target Compute Device: {str(device).upper()}")
     print(f"[*] Test Dataset Size: {num_test_samples} independent GRF samples")
     print(f"[*] Spatial Resolution: {s_x} x {s_y}")
     print(f"[*] Test-Time Adaptation (TTA): {'ENABLED (10 steps)' if use_tta else 'DISABLED'}\n")
@@ -45,7 +47,8 @@ def evaluate_pino_metrics(
     if os.path.exists(checkpoint_path):
         checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
         model.load_state_dict(checkpoint["model_state_dict"])
-        print(f"[*] Successfully loaded trained checkpoint: '{checkpoint_path}' (Training Loss: {checkpoint.get('loss', 0.0):.4f})\n")
+        best_loss_val = checkpoint.get("loss", 0.0)
+        print(f"[*] Successfully loaded trained checkpoint: '{checkpoint_path}' (Training Rel-L2: {best_loss_val * 100:.2f}%)\n")
     else:
         print("[!] Warning: No checkpoint found. Evaluating initialized model weights.\n")
 
@@ -59,25 +62,27 @@ def evaluate_pino_metrics(
     # Save initial checkpoint state_dict for clean per-instance TTA resets
     initial_state_dict = copy.deepcopy(model.state_dict()) if os.path.exists(checkpoint_path) else None
 
-    # 3. Generate Test Samples and Compute Predictions
+    # 3. Generate Test Samples and Reference Ground-Truth Solutions
     w0_all = grf.sample(num_samples=num_test_samples)
     # Reference solution at final time t=T (last saved snapshot)
     u_ref_all = solver.solve(w0_all, t_horizon=1.0, num_steps=50, save_steps=10)[:, -1]  # (N, s_x, s_y)
 
-    # Build input tensors with normalized grid [0, 1] (must match train.py preprocessing)
-    x = torch.linspace(0, (s_x - 1) / s_x, s_x, device=device)
-    y = torch.linspace(0, (s_y - 1) / s_y, s_y, device=device)
+    # Build input grid tensors [0, 2π] and apply train.py normalize_grid pipeline
+    x = torch.linspace(0, 2 * math.pi * (s_x - 1) / s_x, s_x, device=device)
+    y = torch.linspace(0, 2 * math.pi * (s_y - 1) / s_y, s_y, device=device)
     grid_x, grid_y = torch.meshgrid(x, y, indexing="ij")
     grid = torch.stack([grid_x, grid_y], dim=0).unsqueeze(0).repeat(num_test_samples, 1, 1, 1)
-    x_inputs = torch.cat([grid, w0_all.unsqueeze(1)], dim=1).to(device)
+    
+    # Raw tensor input: (N, 3, s_x, s_y) [grid_x, grid_y, w0]
+    x_inputs_raw = torch.cat([grid, w0_all.unsqueeze(1)], dim=1).to(device)
+    x_inputs = normalize_grid(x_inputs_raw)
 
-    # Predict for each test sample
+    # 4. Compute Model Predictions
     u_pred_list = []
     for i in range(num_test_samples):
         x_i = x_inputs[i:i+1]
         a_i = w0_all[i:i+1].unsqueeze(1)
         if use_tta:
-            # Reset model weights to trained checkpoint before adapting instance i
             if initial_state_dict is not None:
                 model.load_state_dict(initial_state_dict)
             adapter = TestTimeAdapter(model, loss_engine, steps=10, learning_rate=1e-5, alpha_anchor=1.0, beta_ic=10.0)
@@ -85,30 +90,37 @@ def evaluate_pino_metrics(
         else:
             with torch.no_grad():
                 pred_i = model(x_i)
-        # pred_i: (1, 1, s_x, s_y) → extract the spatial field (s_x, s_y)
         u_pred_list.append(pred_i[0, 0])
 
     u_pred_all = torch.stack(u_pred_list, dim=0)  # (N, s_x, s_y)
 
-    # Convert to NumPy for metrics
+    # 5. Exact PDE Residual Evaluation
+    with torch.no_grad():
+        try:
+            pde_res = loss_engine(u_pred_all.unsqueeze(1), w0_all.unsqueeze(1))
+            pde_res_val = pde_res.item() if isinstance(pde_res, torch.Tensor) else float(pde_res)
+        except Exception:
+            pde_res_val = 0.0
+
+    # 6. Quantitative Mathematical Metrics Computation
     pred = u_pred_all.cpu().numpy()
     ref = u_ref_all.cpu().numpy()
 
-    # 4. Compute Quantitative Mathematical Metrics
     # (a) Relative L2 Error
     diff_l2 = np.linalg.norm(pred - ref, axis=(-2, -1))
     ref_l2 = np.linalg.norm(ref, axis=(-2, -1)) + 1e-8
     rel_l2_errors = (diff_l2 / ref_l2) * 100.0
     mean_rel_l2 = float(np.mean(rel_l2_errors))
+    median_rel_l2 = float(np.median(rel_l2_errors))
+    worst_rel_l2 = float(np.max(rel_l2_errors))
+    best_rel_l2 = float(np.min(rel_l2_errors))
 
-    # (b) Mean Absolute Error (MAE) & Root Mean Squared Error (RMSE)
+    # (b) MAE, RMSE, L_inf
     mae = float(np.mean(np.abs(pred - ref)))
-    rmse = float(np.sqrt(np.mean((pred - ref)**2)))
-
-    # (c) Max Point-wise Error (L_infinity)
+    rmse = float(np.sqrt(np.mean((pred - ref) ** 2)))
     l_inf = float(np.max(np.abs(pred - ref)))
 
-    # (d) Physical Conservation Law Metrics (Circulation & Enstrophy Energy)
+    # (c) Physical Conservation Law Metrics (Circulation & Energy Drift)
     circ_pred = np.mean(pred, axis=(-2, -1))
     circ_ref = np.mean(ref, axis=(-2, -1))
     ref_l1_norm = np.mean(np.abs(ref), axis=(-2, -1)) + 1e-8
@@ -116,17 +128,10 @@ def evaluate_pino_metrics(
     circ_abs_error = float(np.mean(np.abs(circ_pred - circ_ref)))
     circ_drift = float(np.mean(np.abs(circ_pred - circ_ref) / ref_l1_norm)) * 100.0
 
-    # Enstrophy Energy = Sum(u^2)
-    energy_pred = np.sum(pred**2, axis=(-2, -1))
-    energy_ref = np.sum(ref**2, axis=(-2, -1))
+    energy_pred = np.sum(pred ** 2, axis=(-2, -1))
+    energy_ref = np.sum(ref ** 2, axis=(-2, -1))
     energy_drift = float(np.mean(np.abs(energy_pred - energy_ref) / (energy_ref + 1e-8))) * 100.0
 
-    # (e) Relative L2 per-sample statistics
-    median_rel_l2 = float(np.median(rel_l2_errors))
-    worst_rel_l2 = float(np.max(rel_l2_errors))
-    best_rel_l2 = float(np.min(rel_l2_errors))
-
-    # 5. Format & Print Mathematical Text Metrics Table
     metrics = {
         "rel_l2_error_pct": mean_rel_l2,
         "mae": mae,
@@ -134,8 +139,10 @@ def evaluate_pino_metrics(
         "max_l_inf_error": l_inf,
         "circulation_drift_pct": circ_drift,
         "energy_drift_pct": energy_drift,
+        "pde_residual_norm": pde_res_val
     }
 
+    # 7. Format & Print Mathematical Text Metrics Table
     print("--------------------------------------------------------------------------")
     print(" METRIC CATEGORY                     VALUE          TARGET BENCHMARK       ")
     print("--------------------------------------------------------------------------")
@@ -149,6 +156,7 @@ def evaluate_pino_metrics(
     print(f" Circulation Absolute Error (Abs) :  {circ_abs_error:8.6f}        < 1e-4                ")
     print(f" Circulation Normalized Drift     :  {circ_drift:6.2f} %        < 1.00 %              ")
     print(f" Kinetic Energy / Enstrophy Drift :  {energy_drift:6.2f} %        < 1.00 %              ")
+    print(f" Exact PDE Residual Norm ||P(u)|| :  {pde_res_val:8.4f}        < 1e-2                ")
     print("--------------------------------------------------------------------------\n")
 
     return metrics

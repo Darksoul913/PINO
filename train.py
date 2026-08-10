@@ -54,13 +54,36 @@ def normalize_grid(x_input: torch.Tensor) -> torch.Tensor:
     return x_out
 
 
-def relative_l2(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+# def relative_l2(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+#     """
+#     Computes relative L2 error norm across batch.
+#     """
+#     diff_norms = torch.norm(pred - target, p=2, dim=(-2, -1))
+#     target_norms = torch.norm(target, p=2, dim=(-2, -1)) + 1e-8
+#     return torch.mean(diff_norms / target_norms)
+def compute_batch_metrics_gpu(pred: torch.Tensor, target: torch.Tensor):
     """
-    Computes relative L2 error norm across batch.
+    Computes diagnostic metrics as raw PyTorch GPU tensors without CPU synchronization stalls.
     """
-    diff_norms = torch.norm(pred - target, p=2, dim=(-2, -1))
+    # 1. MSE & MAE
+    diff = pred - target
+    mse = torch.mean(diff ** 2)
+    mae = torch.mean(torch.abs(diff))
+    
+    # 2. L_inf (Max Point-wise Error)
+    l_inf = torch.max(torch.abs(diff))
+    
+    # 3. Energy Drift (% difference in spatial L2 norm squared)
+    pred_energy = torch.sum(pred ** 2, dim=(-2, -1))
+    target_energy = torch.sum(target ** 2, dim=(-2, -1)) + 1e-8
+    energy_drift = torch.mean(torch.abs(pred_energy - target_energy) / target_energy) * 100.0
+
+    # 4. Relative L2 Norm
+    diff_norms = torch.norm(diff, p=2, dim=(-2, -1))
     target_norms = torch.norm(target, p=2, dim=(-2, -1)) + 1e-8
-    return torch.mean(diff_norms / target_norms)
+    rel_l2 = torch.mean(diff_norms / target_norms)
+
+    return mse, mae, l_inf, energy_drift, rel_l2
 
 
 def train_pino(
@@ -114,6 +137,9 @@ def train_pino(
     for epoch in range(1, epochs + 1):
         model.train()
         running_mse = 0.0
+        running_mae = 0.0
+        running_linf = 0.0
+        running_energy = 0.0
         running_rel = 0.0
         num_batches = 0
 
@@ -132,13 +158,25 @@ def train_pino(
 
             running_mse += loss.item()
             with torch.no_grad():
-                running_rel += relative_l2(pred_u, target).item()
+                # running_rel += relative_l2(pred_u, target).item()
+                mse, mae, linf, energy, rel_l2 = compute_batch_metrics_gpu(pred_u, target)
+                running_mse += mse
+                running_mae += mae
+                running_linf += linf
+                running_energy += energy
+                running_rel += rel_l2
             num_batches += 1
 
         scheduler.step()
 
-        avg_mse = running_mse / max(num_batches, 1)
-        avg_rel = running_rel / max(num_batches, 1)
+        # Epoch Metric Averages (Sync with CPU once per epoch)
+        n = max(num_batches, 1)
+        avg_mse = (running_mse / n).item()
+        avg_rmse = math.sqrt(avg_mse)
+        avg_mae = (running_mae / n).item()
+        avg_linf = (running_linf / n).item()
+        avg_energy = (running_energy / n).item()
+        avg_rel = (running_rel / n).item()
 
         # Checkpointing Best Model
         if avg_rel < best_rel_l2:
@@ -156,6 +194,10 @@ def train_pino(
             print(
                 f"  Epoch [{epoch:03d}/{epochs:03d}] | "
                 f"MSE: {avg_mse:.6f} | "
+                f"RMSE: {avg_rmse:.4f} | "
+                f"MAE: {avg_mae:.4f} | "
+                f"L_inf: {avg_linf:.4f} | "
+                f"Energy Drift: {avg_energy:.2f}% | "
                 f"Rel-L2: {avg_rel*100:.2f}% (Best: {best_rel_l2*100:.2f}%) | "
                 f"LR: {current_lr:.2e}",
                 flush=True
