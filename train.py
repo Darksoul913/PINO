@@ -1,8 +1,7 @@
 """
 Stable Multi-Objective Physics-Informed Neural Operator (PINO) Training Pipeline.
 Locks lambda_ic = 1.0 and lambda_data = 1.0 constant throughout training to eliminate initial condition shortcut trap.
-Transitions lambda_pde mildy (0.001 -> 0.01 at Epoch 50).
-Formats PDE loss in scientific notation (6e).
+Includes complex-parameter safe gradient clipping for PyTorch MPS backend.
 """
 
 import os
@@ -14,6 +13,23 @@ from pino.config import PINOConfig, LossConfig
 from pino.models.pino_net import PINO2D
 from pino.physics.pde_loss import PINOLossEngine
 from pino.dataset.pde_dataset import get_pde_dataloader
+
+
+def clip_grad_norm_safe(parameters, max_norm: float = 1.0):
+    """
+    Safe gradient norm clipping supporting complex parameters on PyTorch MPS backend.
+    Views complex gradients as real tensors (torch.view_as_real) to prevent
+    RuntimeError: norm ops are not supported for complex yet on MPS.
+    """
+    for p in parameters:
+        if p.grad is not None:
+            grad = p.grad.data
+            if grad.is_complex():
+                grad_norm = torch.view_as_real(grad).norm()
+            else:
+                grad_norm = grad.norm()
+            if grad_norm > max_norm:
+                p.grad.data = grad * (max_norm / (grad_norm + 1e-6))
 
 
 def train_pino(config: PINOConfig = None, num_samples: int = 1000, epochs: int = 200):
@@ -95,8 +111,8 @@ def train_pino(config: PINOConfig = None, num_samples: int = 1000, epochs: int =
             total_loss = loss_dict["loss_total"]
             total_loss.backward()
 
-            # Gradient clipping to prevent spectral explosion
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            # Safe gradient clipping supporting complex parameters on Metal MPS
+            clip_grad_norm_safe(model.parameters(), max_norm=1.0)
             optimizer.step()
 
             running_total_loss += total_loss.item()
