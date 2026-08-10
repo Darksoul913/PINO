@@ -1,8 +1,8 @@
 """
-Stable Physics-Gated Training Loop for PINO (Navier-Stokes 2D).
-1. Pure Data Warmup Phase (Epochs 1-40): lambda_pde = 0.0 to master spatial phase alignment.
-2. Physics Loss Gating & Clamping (Epochs 41-200): lambda_pde = 1e-4 -> 1e-3, l_pde = torch.clamp(raw_pde, max=10.0).
-3. Complex-Safe Gradient Clipping (max_norm = 0.5) on PyTorch MPS backend.
+Physics-Gated Training Loop for PINO (Navier-Stokes 2D).
+1. Data Warmup Phase (Epochs 1-40): lambda_pde = 0.0 for backprop (PDE loss computed in no_grad for logging).
+2. Physics Regularization Phase (Epochs 41-200): lambda_pde = 1e-4 -> 1e-3, l_pde = torch.clamp(raw_pde, max=10.0).
+3. Complex-Safe Gradient Norm Clipping (max_norm = 0.5) on PyTorch MPS backend.
 4. AdamW (lr=4e-4, weight_decay=1e-4) + CosineAnnealingLR (decay 4e-4 -> 1e-6).
 """
 
@@ -76,16 +76,16 @@ def train_pino(config: PINOConfig = None, num_samples: int = 1000, epochs: int =
         model.train()
 
         # Physics Loss Gating (Warmup Schedule):
-        # Epochs 1-40: Pure data learning (lambda_pde = 0.0)
+        # Epochs 1-40: Pure data learning (lambda_pde = 0.0 for backprop)
         # Epochs 41-200: Gentle physics regularization (lambda_pde = 1e-4 -> 1e-3)
         if epoch <= 40:
             lambda_data = 1.0
-            lambda_ic = 1.0
+            lambda_ic = 0.1
             lambda_pde = 0.0
         else:
             ramp = (epoch - 40) / (epochs - 40)
             lambda_data = 1.0
-            lambda_ic = 1.0
+            lambda_ic = 0.1
             lambda_pde = 1e-4 + ramp * (1e-3 - 1e-4)
 
         running_data, running_ic, running_pde, running_total = 0.0, 0.0, 0.0, 0.0
@@ -108,16 +108,18 @@ def train_pino(config: PINOConfig = None, num_samples: int = 1000, epochs: int =
             # 2. Initial Condition Loss at t=0
             l_ic = loss_engine.compute_ic_loss(pred_u, a_init)
 
-            # 3. Exact PDE Residual (only evaluated when lambda_pde > 0)
-            if lambda_pde > 0:
-                pred_u_eval = pred_u if pred_u.shape[1] > 1 else pred_u.repeat(1, 2, 1, 1)
-                raw_pde = torch.mean(torch.norm(loss_engine.compute_pde_residual(pred_u_eval), p=2, dim=(-2, -1)))
-                # GUARD: Clamp PDE residual to prevent gradient explosion
-                l_pde = torch.clamp(raw_pde, max=10.0)
-            else:
-                l_pde = torch.tensor(0.0, device=device)
+            # 3. Exact PDE Residual
+            pred_u_eval = pred_u if pred_u.shape[1] > 1 else pred_u.repeat(1, 2, 1, 1)
 
-            total_loss = lambda_data * l_data + lambda_ic * l_ic + lambda_pde * l_pde
+            if lambda_pde > 0:
+                raw_pde = torch.mean(torch.norm(loss_engine.compute_pde_residual(pred_u_eval), p=2, dim=(-2, -1)))
+                l_pde = torch.clamp(raw_pde, max=10.0)
+                total_loss = lambda_data * l_data + lambda_ic * l_ic + lambda_pde * l_pde
+            else:
+                with torch.no_grad():
+                    raw_pde = torch.mean(torch.norm(loss_engine.compute_pde_residual(pred_u_eval), p=2, dim=(-2, -1)))
+                l_pde = raw_pde
+                total_loss = lambda_data * l_data + lambda_ic * l_ic
 
             total_loss.backward()
 
@@ -140,7 +142,7 @@ def train_pino(config: PINOConfig = None, num_samples: int = 1000, epochs: int =
         avg_total = running_total / num_batches
 
         # Save checkpoint on true data improvement
-        if avg_data < best_data_loss and epoch > 10:
+        if avg_data < best_data_loss and epoch > 5:
             best_data_loss = avg_data
             torch.save({
                 "epoch": epoch,
@@ -152,7 +154,8 @@ def train_pino(config: PINOConfig = None, num_samples: int = 1000, epochs: int =
 
         if epoch % 10 == 0 or epoch == 1 or epoch == epochs:
             current_lr = scheduler.get_last_lr()[0]
-            print(f"Epoch [{epoch:03d}/{epochs:03d}] | Total: {avg_total:.4f} | IC: {avg_ic:.4f} | Data Loss: {avg_data:.6f} | PDE Loss: {avg_pde:.4e} | LR: {current_lr:.2e}")
+            warmup_str = " [Warmup]" if epoch <= 40 else f" (λ={lambda_pde:.1e})"
+            print(f"Epoch [{epoch:03d}/{epochs:03d}] | Total: {avg_total:.4f} | IC: {avg_ic:.4f} | Data Loss: {avg_data:.6f} | PDE Loss{warmup_str}: {avg_pde:.4e} | LR: {current_lr:.2e}")
 
     print(f"\n--- Physics-Gated Training Completed! Best Checkpoint Saved to 'checkpoints/pino_best.pt' (Data Loss: {best_data_loss:.6f}) ---")
     return model
