@@ -123,10 +123,12 @@ class PINOLossEngine(nn.Module):
             l_data = self.relative_l2_loss(pred_u, target_u)
 
         # PDE residual loss
-        l_pde = torch.tensor(0.0, device=self.device)
-        if pred_u.ndim == 4 and pred_u.shape[1] > 1:
-            pde_res = self.compute_pde_residual(pred_u, forcing=forcing)
+        if pred_u.ndim == 4:
+            pred_u_eval = pred_u if pred_u.shape[1] > 1 else pred_u.repeat(1, 2, 1, 1)
+            pde_res = self.compute_pde_residual(pred_u_eval, forcing=forcing)
             l_pde = torch.mean(torch.norm(pde_res, p=2, dim=(-2, -1)))
+        else:
+            l_pde = torch.tensor(0.0, device=self.device)
 
         # Total combined multi-objective loss
         l_total = (
