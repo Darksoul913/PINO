@@ -68,6 +68,6 @@ class PINOConfig:
     model: ModelConfig = field(default_factory=ModelConfig)
     loss: LossConfig = field(default_factory=LossConfig)
     device: str = field(default_factory=get_default_device)  # Auto-detected target compute device
-    batch_size: int = 8
+    batch_size: int = 16
     learning_rate: float = 1e-3
     epochs: int = 200

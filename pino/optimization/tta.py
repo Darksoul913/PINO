@@ -1,7 +1,7 @@
 """
-Regularized Test-Time Adaptation (TTA) Engine for PINO.
-Prevents trajectory drift using baseline spatial anchoring (alpha_anchor)
-and initial condition enforcement (beta_ic).
+Targeted Layer-Specific Test-Time Adaptation (TTA) Engine for PINO.
+Freezes global Fourier convolution layers and optimizes ONLY the local MLP projection head
+with spatial anchoring (alpha_anchor) and initial condition enforcement (beta_ic).
 """
 
 import torch
@@ -15,7 +15,8 @@ from pino.physics.pde_loss import PINOLossEngine
 
 class TestTimeAdapter:
     """
-    Regularized Instance-Level Test-Time Adapter.
+    Targeted Layer-Specific Test-Time Adapter.
+    Updates only local MLP projection parameters (fc1, fc2) while keeping global Fourier weights frozen.
     L_TTA = L_pde + alpha_anchor * ||u_pred - u_base||^2 + beta_ic * ||u_pred(0) - a_input||^2
     """
 
@@ -42,7 +43,7 @@ class TestTimeAdapter:
         forcing: torch.Tensor = None
     ) -> Tuple[torch.Tensor, Dict[str, float]]:
         """
-        Adapts model on a single input instance.
+        Adapts model on a single input instance by fine-tuning ONLY projection head parameters.
         """
         self.model.eval()
 
@@ -50,8 +51,16 @@ class TestTimeAdapter:
         with torch.no_grad():
             u_base = self.model(x_input).detach().clone()
 
-        # Enable optimizer for model parameters
-        optimizer = optim.Adam(self.model.parameters(), lr=self.lr)
+        # 2. Freeze Fourier convolution layers; keep ONLY projection head trainable
+        for param in self.model.parameters():
+            param.requires_grad = False
+        for param in self.model.projection.parameters():
+            param.requires_grad = True
+
+        optimizer = optim.Adam(
+            filter(lambda p: p.requires_grad, self.model.parameters()),
+            lr=self.lr
+        )
 
         initial_loss = 0.0
         final_loss = 0.0
@@ -86,6 +95,10 @@ class TestTimeAdapter:
         # Final adapted prediction
         with torch.no_grad():
             adapted_pred = self.model(x_input)
+
+        # 3. Restore requires_grad = True for all parameters
+        for param in self.model.parameters():
+            param.requires_grad = True
 
         history = {
             "initial_loss": initial_loss,

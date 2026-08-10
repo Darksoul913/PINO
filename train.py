@@ -139,4 +139,4 @@ def train_pino(config: PINOConfig = None, num_samples: int = 400, epochs: int = 
 
 
 if __name__ == "__main__":
-    train_pino(num_samples=400, epochs=200)
+    train_pino(num_samples=500, epochs=200)
