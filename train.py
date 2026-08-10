@@ -46,9 +46,9 @@ def train_pino(config: PINOConfig = None, num_samples: int = 400, epochs: int = 
         device=str(device)
     )
 
-    # 3. Optimizer & Cosine Annealing Scheduler (decay 1e-3 -> 1e-6)
-    optimizer = optim.Adam(model.parameters(), lr=config.learning_rate)
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs, eta_min=1e-6)
+    # 3. AdamW Optimizer & Cosine Annealing Scheduler (decay 1e-3 -> 1e-5)
+    optimizer = optim.AdamW(model.parameters(), lr=config.learning_rate, weight_decay=1e-4)
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs, eta_min=1e-5)
 
     # 4. Training Loop with Two-Phase Loss Curriculum
     os.makedirs("checkpoints", exist_ok=True)
@@ -139,4 +139,4 @@ def train_pino(config: PINOConfig = None, num_samples: int = 400, epochs: int = 
 
 
 if __name__ == "__main__":
-    train_pino(num_samples=500, epochs=200)
+    train_pino(num_samples=1000, epochs=200)
