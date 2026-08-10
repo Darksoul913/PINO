@@ -128,6 +128,10 @@ class NavierStokes2DSolver:
                 w_phys = torch.fft.ifft2(current_w_hat).real.cpu()
                 history.append(w_phys)
 
+        # Always include the true final state at t=T as the last snapshot
+        w_final = torch.fft.ifft2(current_w_hat).real.cpu()
+        history[-1] = w_final
+
         # Stack temporal trajectory: (batch_size, save_steps, s_x, s_y)
         trajectory = torch.stack(history, dim=1)
         return trajectory

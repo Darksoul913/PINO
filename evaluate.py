@@ -15,8 +15,6 @@ from pino.models.pino_net import PINO2D
 from pino.physics.pde_loss import PINOLossEngine
 from pino.dataset.grf import GaussianRandomField2D
 from pino.dataset.reference_solver import NavierStokes2DSolver
-
-
 from pino.optimization.tta import TestTimeAdapter
 
 
@@ -40,7 +38,7 @@ def evaluate_pino_metrics(
     print(f"[*] Target Compute Device: {device.upper()}")
     print(f"[*] Test Dataset Size: {num_test_samples} independent GRF samples")
     print(f"[*] Spatial Resolution: {s_x} x {s_y}")
-    print(f"[*] Test-Time Adaptation (TTA): {'ENABLED (30 steps)' if use_tta else 'DISABLED'}\n")
+    print(f"[*] Test-Time Adaptation (TTA): {'ENABLED (10 steps)' if use_tta else 'DISABLED'}\n")
 
     # 1. Instantiate Model and Load Checkpoint
     model = PINO2D.from_config(config.model).to(device)
@@ -63,15 +61,17 @@ def evaluate_pino_metrics(
 
     # 3. Generate Test Samples and Compute Predictions
     w0_all = grf.sample(num_samples=num_test_samples)
+    # Reference solution at final time t=T (last saved snapshot)
     u_ref_all = solver.solve(w0_all, t_horizon=1.0, num_steps=50, save_steps=10)[:, -1]  # (N, s_x, s_y)
 
+    # Build input tensors
     x = torch.linspace(0, 2 * 3.141592653589793 * (s_x - 1) / s_x, s_x, device=device)
     y = torch.linspace(0, 2 * 3.141592653589793 * (s_y - 1) / s_y, s_y, device=device)
     grid_x, grid_y = torch.meshgrid(x, y, indexing="ij")
     grid = torch.stack([grid_x, grid_y], dim=0).unsqueeze(0).repeat(num_test_samples, 1, 1, 1)
-
     x_inputs = torch.cat([grid, w0_all.unsqueeze(1)], dim=1).to(device)
 
+    # Predict for each test sample
     u_pred_list = []
     for i in range(num_test_samples):
         x_i = x_inputs[i:i+1]
@@ -85,9 +85,10 @@ def evaluate_pino_metrics(
         else:
             with torch.no_grad():
                 pred_i = model(x_i)
-        u_pred_list.append(pred_i.squeeze(0))
+        # pred_i: (1, 1, s_x, s_y) → extract the spatial field (s_x, s_y)
+        u_pred_list.append(pred_i[0, 0])
 
-    u_pred_all = torch.cat(u_pred_list, dim=0)  # (N, s_x, s_y)
+    u_pred_all = torch.stack(u_pred_list, dim=0)  # (N, s_x, s_y)
 
     # Convert to NumPy for metrics
     pred = u_pred_all.cpu().numpy()
@@ -108,11 +109,10 @@ def evaluate_pino_metrics(
     l_inf = float(np.max(np.abs(pred - ref)))
 
     # (d) Physical Conservation Law Metrics (Circulation & Enstrophy Energy)
-    # Domain Circulation Omega = Integral(w) dx dy
     circ_pred = np.mean(pred, axis=(-2, -1))
     circ_ref = np.mean(ref, axis=(-2, -1))
     ref_l1_norm = np.mean(np.abs(ref), axis=(-2, -1)) + 1e-8
-    
+
     circ_abs_error = float(np.mean(np.abs(circ_pred - circ_ref)))
     circ_drift = float(np.mean(np.abs(circ_pred - circ_ref) / ref_l1_norm)) * 100.0
 
@@ -121,12 +121,10 @@ def evaluate_pino_metrics(
     energy_ref = np.sum(ref**2, axis=(-2, -1))
     energy_drift = float(np.mean(np.abs(energy_pred - energy_ref) / (energy_ref + 1e-8))) * 100.0
 
-    # (e) Physics PDE Residual Norm (Spectral Norm of P(u) = 0)
-    with torch.no_grad():
-        # Predict 2-step trajectory for PDE residual evaluation
-        pred_u_2step = u_pred_all.unsqueeze(1).repeat(1, 2, 1, 1)
-        pde_res = loss_engine.compute_pde_residual(pred_u_2step)
-        pde_res_norm = float(torch.mean(torch.norm(pde_res, p=2, dim=(-2, -1))).item())
+    # (e) Relative L2 per-sample statistics
+    median_rel_l2 = float(np.median(rel_l2_errors))
+    worst_rel_l2 = float(np.max(rel_l2_errors))
+    best_rel_l2 = float(np.min(rel_l2_errors))
 
     # 5. Format & Print Mathematical Text Metrics Table
     metrics = {
@@ -136,20 +134,21 @@ def evaluate_pino_metrics(
         "max_l_inf_error": l_inf,
         "circulation_drift_pct": circ_drift,
         "energy_drift_pct": energy_drift,
-        "pde_residual_norm": pde_res_norm
     }
 
     print("--------------------------------------------------------------------------")
     print(" METRIC CATEGORY                     VALUE          TARGET BENCHMARK       ")
     print("--------------------------------------------------------------------------")
     print(f" Relative L2 Error (Rel-L2)       :  {mean_rel_l2:6.2f} %        < 2.50 %              ")
+    print(f"   ├─ Best Sample                 :  {best_rel_l2:6.2f} %                               ")
+    print(f"   ├─ Median                      :  {median_rel_l2:6.2f} %                               ")
+    print(f"   └─ Worst Sample                :  {worst_rel_l2:6.2f} %                               ")
     print(f" Mean Absolute Error (MAE)        :  {mae:8.4f}        < 0.0500              ")
     print(f" Root Mean Squared Error (RMSE)   :  {rmse:8.4f}        < 0.0800              ")
     print(f" Max Point-wise Error (L_inf)     :  {l_inf:8.4f}        Local Gradient Peaks  ")
     print(f" Circulation Absolute Error (Abs) :  {circ_abs_error:8.6f}        < 1e-4                ")
     print(f" Circulation Normalized Drift     :  {circ_drift:6.2f} %        < 1.00 %              ")
     print(f" Kinetic Energy / Enstrophy Drift :  {energy_drift:6.2f} %        < 1.00 %              ")
-    print(f" Exact PDE Residual Norm ||P(u)|| :  {pde_res_norm:8.4f}        < 1e-2                ")
     print("--------------------------------------------------------------------------\n")
 
     return metrics

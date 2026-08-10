@@ -1,17 +1,17 @@
 """
-Corrected & Stable Physics-Gated Training Pipeline for PINO (Navier-Stokes 2D).
-1. Removes conflicting IC loss penalty on final time snapshot t=1.0.
-2. Implements true global gradient norm clipping across complex and real parameters on Metal MPS.
-3. Warmup Phase (Epochs 1-40): Pure data learning (lambda_data=1.0, lambda_pde=0.0).
-4. Physics Phase (Epochs 41-200): Physics residual ramp (lambda_pde=1e-4 -> 1e-3).
+Pure Data-Driven Fourier Neural Operator (FNO) Training Pipeline.
+Standard approach from Li et al. (2021): learns the operator mapping a(x,y) → u(x,y,T)
+using ONLY supervised data loss (relative L2 norm) against RK4 reference solutions.
+
+No PDE residual loss during training — physics regularization is applied only
+during Test-Time Adaptation (TTA) in evaluate.py.
 """
 
 import os
 import torch
 import torch.optim as optim
-from tqdm import tqdm
 
-from pino.config import PINOConfig, LossConfig
+from pino.config import PINOConfig
 from pino.models.pino_net import PINO2D
 from pino.physics.pde_loss import PINOLossEngine
 from pino.dataset.pde_dataset import get_pde_dataloader
@@ -19,13 +19,11 @@ from pino.dataset.pde_dataset import get_pde_dataloader
 
 def clip_grad_norm_safe(parameters, max_norm: float = 1.0):
     """
-    True Global Gradient Norm Clipping supporting complex parameters on PyTorch MPS backend.
-    Calculates total global norm across all parameters combined (viewing complex grads as real)
-    and scales all gradients uniformly if total_norm > max_norm.
+    Global gradient norm clipping supporting complex parameters on PyTorch MPS backend.
     """
     parameters = [p for p in parameters if p.grad is not None]
     if len(parameters) == 0:
-        return torch.tensor(0.0)
+        return 0.0
 
     total_sq_norm = 0.0
     for p in parameters:
@@ -35,7 +33,7 @@ def clip_grad_norm_safe(parameters, max_norm: float = 1.0):
         else:
             total_sq_norm += (g.norm() ** 2).item()
 
-    total_norm = torch.sqrt(torch.tensor(total_sq_norm))
+    total_norm = total_sq_norm ** 0.5
     clip_coef = max_norm / (total_norm + 1e-6)
 
     if clip_coef < 1.0:
@@ -45,17 +43,19 @@ def clip_grad_norm_safe(parameters, max_norm: float = 1.0):
     return total_norm
 
 
-def train_pino(config: PINOConfig = None, num_samples: int = 1000, epochs: int = 200, base_lr: float = 4e-4):
+def train_pino(config: PINOConfig = None, num_samples: int = 1000, epochs: int = 200):
     """
-    Physics-Gated Training Loop for PINO.
+    Pure data-driven FNO training loop.
+    Loss = relative_l2(model(a), u_ref(T))
     """
     if config is None:
         config = PINOConfig()
 
     device = torch.device(config.device)
-    print(f"--- Starting Corrected PINO Training Pipeline on Device: {device} ({epochs} Epochs, {num_samples} Samples, lr={base_lr}) ---")
+    lr = 1e-3
+    print(f"--- Pure Data-Driven FNO Training on Device: {device} ({epochs} Epochs, {num_samples} Samples, lr={lr}) ---")
 
-    # 1. DataLoader with ground-truth reference data
+    # 1. DataLoader with ground-truth reference trajectories
     dataloader = get_pde_dataloader(
         num_samples=num_samples,
         batch_size=config.batch_size,
@@ -66,87 +66,61 @@ def train_pino(config: PINOConfig = None, num_samples: int = 1000, epochs: int =
         device=str(device)
     )
 
-    # 2. Model & Loss Engine
+    # 2. Model
     model = PINO2D.from_config(config.model).to(device)
-    loss_engine = PINOLossEngine(
-        s_x=config.domain.s_x,
-        s_y=config.domain.s_y,
-        viscosity=config.pde.viscosity,
-        device=str(device)
-    )
+    total_params = sum(p.numel() for p in model.parameters())
+    print(f"[*] Model Parameters: {total_params:,}")
 
-    # 3. AdamW Optimizer & Cosine Annealing Scheduler (base_lr=4e-4 -> 1e-6)
-    optimizer = optim.AdamW(model.parameters(), lr=base_lr, weight_decay=1e-4)
+    # 3. Relative L2 loss function (same as loss_engine but standalone)
+    def relative_l2_loss(pred, target):
+        """||pred - target||_2 / ||target||_2, averaged over batch."""
+        diff_norms = torch.norm(pred - target, p=2, dim=(-2, -1))
+        target_norms = torch.norm(target, p=2, dim=(-2, -1)) + 1e-8
+        return torch.mean(diff_norms / target_norms)
+
+    # 4. AdamW Optimizer + Cosine Annealing Scheduler
+    optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs, eta_min=1e-6)
 
     os.makedirs("checkpoints", exist_ok=True)
     best_data_loss = float("inf")
 
-    # 4. Training Loop
+    # 5. Training Loop — Pure Data Loss Only
     for epoch in range(1, epochs + 1):
         model.train()
-
-        # Warmup Schedule:
-        # Epochs 1-40: Pure data learning (lambda_pde = 0.0)
-        # Epochs 41-200: Gentle physics regularization (lambda_pde = 1e-4 -> 1e-3)
-        if epoch <= 40:
-            lambda_data = 1.0
-            lambda_pde = 0.0
-        else:
-            ramp = (epoch - 40) / (epochs - 40)
-            lambda_data = 1.0
-            lambda_pde = 1e-4 + ramp * (1e-3 - 1e-4)
-
-        running_data, running_pde, running_total = 0.0, 0.0, 0.0
+        running_loss = 0.0
+        num_batches = 0
 
         for batch in dataloader:
             x_input = batch["x_input"].to(device)   # (batch, 3, s_x, s_y)
             target = batch.get("target", None)
-            if target is not None:
-                target = target[:, -1:].to(device)   # Match final snapshot shape (batch, 1, s_x, s_y)
+            if target is None:
+                continue
+            # Take final time snapshot t=T as supervision target
+            target = target[:, -1:].to(device)       # (batch, 1, s_x, s_y)
 
             optimizer.zero_grad()
 
-            # Forward pass (predicts vorticity field u at t_final = 1.0)
-            pred_u = model(x_input)  # (batch, 1, s_x, s_y)
+            # Forward: a(x,y) → u_pred(x,y,T)
+            pred_u = model(x_input)                  # (batch, 1, s_x, s_y)
 
-            # 1. Trajectory Data Loss against target at t_final
-            l_data = loss_engine.relative_l2_loss(pred_u, target) if target is not None else torch.tensor(0.0, device=device)
+            # Pure supervised relative L2 loss
+            loss = relative_l2_loss(pred_u, target)
 
-            # 2. Exact PDE Residual
-            pred_u_eval = pred_u if pred_u.shape[1] > 1 else pred_u.repeat(1, 2, 1, 1)
-
-            if lambda_pde > 0:
-                raw_pde = torch.mean(torch.norm(loss_engine.compute_pde_residual(pred_u_eval), p=2, dim=(-2, -1)))
-                l_pde = torch.clamp(raw_pde, max=10.0)
-                total_loss = lambda_data * l_data + lambda_pde * l_pde
-            else:
-                with torch.no_grad():
-                    raw_pde = torch.mean(torch.norm(loss_engine.compute_pde_residual(pred_u_eval), p=2, dim=(-2, -1)))
-                l_pde = raw_pde
-                total_loss = lambda_data * l_data
-
-            total_loss.backward()
-
-            # True Global Gradient Norm Clipping supporting complex parameters
+            loss.backward()
             clip_grad_norm_safe(model.parameters(), max_norm=1.0)
-
             optimizer.step()
 
-            running_data += l_data.item()
-            running_pde += l_pde.item()
-            running_total += total_loss.item()
+            running_loss += loss.item()
+            num_batches += 1
 
         scheduler.step()
 
-        num_batches = len(dataloader)
-        avg_data = running_data / num_batches
-        avg_pde = running_pde / num_batches
-        avg_total = running_total / num_batches
+        avg_loss = running_loss / max(num_batches, 1)
 
-        # Save checkpoint on true data improvement
-        if avg_data < best_data_loss and epoch > 5:
-            best_data_loss = avg_data
+        # Save checkpoint on data loss improvement
+        if avg_loss < best_data_loss and epoch > 3:
+            best_data_loss = avg_loss
             torch.save({
                 "epoch": epoch,
                 "model_state_dict": model.state_dict(),
@@ -157,12 +131,12 @@ def train_pino(config: PINOConfig = None, num_samples: int = 1000, epochs: int =
 
         if epoch % 10 == 0 or epoch == 1 or epoch == epochs:
             current_lr = scheduler.get_last_lr()[0]
-            pde_str = " [Warmup]" if epoch <= 40 else f" (λ={lambda_pde:.1e})"
-            print(f"Epoch [{epoch:03d}/{epochs:03d}] | Total: {avg_total:.4f} | Data Loss: {avg_data:.6f} | PDE Loss{pde_str}: {avg_pde:.4e} | LR: {current_lr:.2e}")
+            pct = avg_loss * 100
+            print(f"Epoch [{epoch:03d}/{epochs:03d}] | Rel-L2 Loss: {avg_loss:.6f} ({pct:.2f}%) | LR: {current_lr:.2e}")
 
-    print(f"\n--- Training Completed! Best Checkpoint Saved to 'checkpoints/pino_best.pt' (Data Loss: {best_data_loss:.6f}) ---")
+    print(f"\n--- Training Complete! Best: 'checkpoints/pino_best.pt' (Rel-L2: {best_data_loss:.6f} = {best_data_loss*100:.2f}%) ---")
     return model
 
 
 if __name__ == "__main__":
-    train_pino(num_samples=1000, epochs=200, base_lr=4e-4)
+    train_pino(num_samples=1000, epochs=200)
