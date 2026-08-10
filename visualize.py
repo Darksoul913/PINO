@@ -39,9 +39,9 @@ def visualize_pino_fields(
     trajectory_ref = solver.solve(w0, t_horizon=1.0, num_steps=50, save_steps=10)
     u_rk4 = trajectory_ref[0, -1].cpu().numpy()  # Final snapshot (64, 64)
 
-    # 3. Prepare PINO input grid
-    x = torch.linspace(0, 2 * 3.141592653589793 * (s_x - 1) / s_x, s_x, device=device)
-    y = torch.linspace(0, 2 * 3.141592653589793 * (s_y - 1) / s_y, s_y, device=device)
+    # 3. Prepare PINO input grid with normalized coordinates [0, 1] (must match train.py)
+    x = torch.linspace(0, (s_x - 1) / s_x, s_x, device=device)
+    y = torch.linspace(0, (s_y - 1) / s_y, s_y, device=device)
     grid_x, grid_y = torch.meshgrid(x, y, indexing="ij")
     x_input = torch.cat([grid_x.unsqueeze(0), grid_y.unsqueeze(0), w0], dim=0).unsqueeze(0).to(device)
 

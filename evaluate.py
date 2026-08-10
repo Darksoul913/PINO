@@ -64,9 +64,9 @@ def evaluate_pino_metrics(
     # Reference solution at final time t=T (last saved snapshot)
     u_ref_all = solver.solve(w0_all, t_horizon=1.0, num_steps=50, save_steps=10)[:, -1]  # (N, s_x, s_y)
 
-    # Build input tensors
-    x = torch.linspace(0, 2 * 3.141592653589793 * (s_x - 1) / s_x, s_x, device=device)
-    y = torch.linspace(0, 2 * 3.141592653589793 * (s_y - 1) / s_y, s_y, device=device)
+    # Build input tensors with normalized grid [0, 1] (must match train.py preprocessing)
+    x = torch.linspace(0, (s_x - 1) / s_x, s_x, device=device)
+    y = torch.linspace(0, (s_y - 1) / s_y, s_y, device=device)
     grid_x, grid_y = torch.meshgrid(x, y, indexing="ij")
     grid = torch.stack([grid_x, grid_y], dim=0).unsqueeze(0).repeat(num_test_samples, 1, 1, 1)
     x_inputs = torch.cat([grid, w0_all.unsqueeze(1)], dim=1).to(device)
