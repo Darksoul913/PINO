@@ -1,0 +1,1186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PINO | 2D Navier-Stokes Neural Operator Studio</title>
+
+  <!-- Editorial Typography -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet" />
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Plotly.js 2.32.0 -->
+  <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- KaTeX (CSS + JS + Auto-Render) -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" />
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+
+  <!-- Studio Stylesheet -->
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body class="bg-white min-h-screen flex flex-col text-slate-900">
+
+  <!-- TOP HEADER -->
+  <header class="studio-header">
+    <canvas id="headerFlowCanvas" class="header-flow-canvas" aria-hidden="true"></canvas>
+    <div class="relative z-10 max-w-[1440px] mx-auto px-4 sm:px-6 py-3.5 flex flex-wrap items-center justify-between gap-3">
+      <div class="flex items-center space-x-3">
+        <div class="brand-mark w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-sm shrink-0">
+          <i data-lucide="waves" class="w-5 h-5 relative z-10"></i>
+        </div>
+        <div>
+          <h1 class="text-lg sm:text-xl font-bold text-slate-900 tracking-tight leading-tight">
+            Physics-Informed Neural Operator (PINO)
+          </h1>
+          <p class="text-xs text-slate-500 font-medium">
+            Continuous Operator Learning for 2D Navier-Stokes Vorticity &amp; Active Flow Control
+          </p>
+        </div>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-2">
+        <!-- Live Checkpoint Badge (Populated from /api/info) -->
+        <span id="checkpointBadge" class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 font-mono">
+          <span class="w-2 h-2 mr-2 rounded-full bg-emerald-500 animate-pulse"></span>
+          Loading checkpoint info...
+        </span>
+
+        <!-- Compute Device Badge -->
+        <span id="deviceBadge" class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200 font-mono">
+          COMPUTE
+        </span>
+
+        <!-- Viva Utility Buttons -->
+        <button id="presentationModeBtn" title="Toggle Presentation Mode (Hide sidebar &amp; enlarge plots)" class="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 transition">
+          <i data-lucide="maximize-2" class="w-3.5 h-3.5"></i>
+          <span id="presentationBtnText">Presentation Mode</span>
+        </button>
+
+        <button id="exportPngBtn" title="Download visible Plotly charts as PNG" class="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 transition">
+          <i data-lucide="image-down" class="w-3.5 h-3.5 text-blue-600"></i>
+          <span>Export PNG</span>
+        </button>
+
+        <button id="exportJsonBtn" title="Download current telemetry metrics as JSON" class="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 transition">
+          <i data-lucide="file-json" class="w-3.5 h-3.5 text-emerald-600"></i>
+          <span>Export Metrics JSON</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- MAIN WORKSPACE -->
+  <div class="max-w-[1440px] mx-auto px-4 sm:px-6 py-6 flex-1 w-full grid grid-cols-12 gap-6">
+
+    <!-- SIDEBAR CONTROLS -->
+    <aside id="sidebarPanel" class="col-span-12 lg:col-span-3 space-y-5">
+
+      <!-- Simulation Controls Card -->
+      <div class="control-card p-5 space-y-4">
+        <h3 class="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center">
+          <i data-lucide="sliders-horizontal" class="w-4 h-4 mr-2 text-blue-600"></i>
+          Simulation Controls
+        </h3>
+
+        <!-- Physical Flow Preset -->
+        <div>
+          <label for="presetSelect" class="block text-xs font-semibold text-slate-600 mb-1">Physical Flow Preset</label>
+          <select id="presetSelect" class="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 font-medium focus:ring-2 focus:ring-blue-500 focus:outline-none">
+            <option value="grf">Gaussian Random Field (Turbulent)</option>
+            <option value="dipole">Vortex Dipole Collision Pair</option>
+            <option value="shear">Kelvin-Helmholtz Shear Roll-up</option>
+            <option value="taylor_green">Taylor-Green Vortex Lattice</option>
+            <option value="custom">Custom Interactive Vortex Paint</option>
+          </select>
+          <div id="regimeBadge" class="mt-2 text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-md flex items-center">
+            <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1.5"></span>
+            <span>In-Distribution GRF</span>
+          </div>
+        </div>
+
+        <!-- Interactive Vortex Painter (Visible only when preset === 'custom') -->
+        <div id="vortexPainterPanel" class="hidden border border-blue-200 bg-white rounded-xl p-3.5 space-y-3">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold text-slate-800 flex items-center">
+              <i data-lucide="paintbrush" class="w-3.5 h-3.5 mr-1.5 text-blue-600"></i>
+              Interactive Vortex Painter
+            </span>
+            <span id="vortexCountLabel" class="text-[11px] font-mono font-semibold text-slate-500">2 vortices</span>
+          </div>
+
+          <!-- Polarity Toggle -->
+          <div class="grid grid-cols-2 gap-1.5">
+            <button type="button" id="polarityCcwBtn" class="px-2 py-1.5 rounded-lg text-xs font-bold border border-red-300 bg-red-50 text-red-700 flex items-center justify-center space-x-1 transition">
+              <span>+ CCW (Red)</span>
+            </button>
+            <button type="button" id="polarityCwBtn" class="px-2 py-1.5 rounded-lg text-xs font-semibold border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 flex items-center justify-center space-x-1 transition">
+              <span>− CW (Blue)</span>
+            </button>
+          </div>
+
+          <!-- 220x220 Canvas -->
+          <div class="vortex-canvas-wrap">
+            <canvas id="vortexCanvas" width="220" height="220"></canvas>
+          </div>
+          <p class="text-[10px] text-slate-400 text-center">Click or drag on periodic $[0, 2\pi)^2$ canvas to stamp vortices</p>
+
+          <!-- Brush Sigma Slider -->
+          <div>
+            <div class="flex justify-between text-xs font-semibold text-slate-700 mb-1">
+              <span>Brush Core Radius ($\sigma$)</span>
+              <span id="brushSigmaVal" class="text-blue-600 font-mono">0.08</span>
+            </div>
+            <input type="range" id="brushSigmaSlider" min="0.04" max="0.18" step="0.01" value="0.08" class="w-full cursor-pointer" />
+          </div>
+
+          <!-- Action Buttons -->
+          <div class="grid grid-cols-3 gap-1.5">
+            <button type="button" id="vortexUndoBtn" class="px-1.5 py-1.5 rounded-lg text-[11px] font-semibold whitespace-nowrap border border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 transition">Undo</button>
+            <button type="button" id="vortexClearBtn" class="px-1.5 py-1.5 rounded-lg text-[11px] font-semibold whitespace-nowrap border border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 transition">Clear</button>
+            <button type="button" id="vortexSeedBtn" class="px-1.5 py-1.5 rounded-lg text-[11px] font-semibold whitespace-nowrap border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 transition">Seed Dipole</button>
+          </div>
+        </div>
+
+        <!-- GRF Sliders -->
+        <div id="grfControls" class="space-y-3.5">
+          <div>
+            <div class="flex justify-between text-xs font-semibold text-slate-700 mb-1">
+              <span>Length Scale ($l$)</span>
+              <span id="lengthScaleVal" class="text-blue-600 font-mono">0.50</span>
+            </div>
+            <input type="range" id="lengthScaleSlider" min="0.10" max="1.00" step="0.02" value="0.50" class="w-full cursor-pointer" />
+            <p class="text-[11px] text-slate-400 mt-0.5">Morphs characteristic vortex length scale in real time</p>
+          </div>
+
+          <div>
+            <div class="flex justify-between text-xs font-semibold text-slate-700 mb-1">
+              <span>Smoothness Regularity ($\alpha$)</span>
+              <span id="alphaVal" class="text-blue-600 font-mono">2.50</span>
+            </div>
+            <input type="range" id="alphaSlider" min="1.50" max="3.50" step="0.10" value="2.50" class="w-full cursor-pointer" />
+            <p class="text-[11px] text-slate-400 mt-0.5">Controls Sobolev power-law spectral decay</p>
+          </div>
+        </div>
+
+        <!-- Seed Input -->
+        <div>
+          <div class="flex justify-between text-xs font-semibold text-slate-700 mb-1">
+            <span>Random Generator Seed</span>
+            <span id="seedVal" class="text-blue-600 font-mono">42</span>
+          </div>
+          <div class="flex space-x-2">
+            <input type="number" id="seedInput" min="1" max="99999" value="42" class="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-sm font-mono text-slate-800 focus:ring-2 focus:ring-blue-500 focus:outline-none" />
+            <button type="button" id="randomSeedBtn" title="Randomize Seed" class="px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-slate-700 hover:bg-slate-100 transition inline-flex items-center justify-center">
+              <i data-lucide="dices" class="w-4 h-4"></i>
+            </button>
+          </div>
+        </div>
+
+        <!-- Viscosity Selector -->
+        <div>
+          <label for="viscositySelect" class="block text-xs font-semibold text-slate-600 mb-1">
+            Kinematic Viscosity ($\nu$) &amp; Reynolds ($\mathrm{Re}=1/\nu$)
+          </label>
+          <select id="viscositySelect" class="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs font-mono font-semibold text-slate-800 focus:ring-2 focus:ring-blue-500 focus:outline-none">
+            <option value="0.0001">ν = 1e-4  (Re = 10,000)</option>
+            <option value="0.0005">ν = 5e-4  (Re = 2,000)</option>
+            <option value="0.001" selected>ν = 1e-3  (Re = 1,000 • Default)</option>
+            <option value="0.002">ν = 2e-3  (Re = 500)</option>
+            <option value="0.005">ν = 5e-3  (Re = 200)</option>
+          </select>
+        </div>
+
+        <!-- Target Resolution Selector -->
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1.5">Target Evaluation Resolution</label>
+          <div class="grid grid-cols-3 gap-2">
+            <button type="button" class="res-btn px-2 py-1.5 text-xs font-semibold rounded-lg border border-blue-600 bg-blue-50 text-blue-700 font-mono" data-res="64">64² (Base)</button>
+            <button type="button" class="res-btn px-2 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 font-mono" data-res="128">128²</button>
+            <button type="button" class="res-btn px-2 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 font-mono" data-res="256">256²</button>
+          </div>
+        </div>
+
+        <!-- Quick Action Button -->
+        <button type="button" id="refreshBtn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2.5 px-4 rounded-lg shadow-sm transition flex items-center justify-center space-x-2 text-xs">
+          <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+          <span>Re-compute Forward Pass</span>
+        </button>
+      </div>
+
+      <!-- Mathematical Backbone Card -->
+      <div class="control-card p-4 text-xs text-slate-600 space-y-2">
+        <div class="font-bold text-slate-800 uppercase tracking-wide text-[11px] flex items-center">
+          <i data-lucide="book-open" class="w-3.5 h-3.5 mr-1.5 text-blue-600"></i>
+          Mathematical Backbone
+        </div>
+        <p>• <b>Fourier Operator:</b> Discrete rFFT2 truncated to <span id="backboneKmax" class="font-mono font-semibold text-slate-900">k_max = 16</span> across <span id="backboneLayers" class="font-mono font-semibold text-slate-900">4 SpectralConv2d</span> layers.</p>
+        <p>• <b>Derivatives:</b> Exact Fourier multipliers <span class="font-mono text-slate-800">∇u = i k û</span> &amp; 2/3 Orszag dealiasing.</p>
+        <p>• <b>Capacity:</b> <span id="backboneParams" class="font-mono font-semibold text-slate-900">-- params</span> (<span id="backboneHidden" class="font-mono text-slate-700">d_v = 64</span>).</p>
+        <p>• <b>Mesh-Invariance:</b> Zero-shot super-resolution without spatial retraining.</p>
+      </div>
+    </aside>
+
+    <!-- MAIN CONTENT -->
+    <main id="mainContent" class="col-span-12 lg:col-span-9 space-y-6">
+
+      <!-- HONEST TOP TELEMETRY CARDS (4 Cards) -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+
+        <div class="metric-card">
+          <div class="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Inference Latency</div>
+          <div class="text-2xl font-bold font-mono text-slate-900" id="latencyMetric">-- ms</div>
+          <div class="mt-2 inline-flex items-center text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full font-mono" id="latencySub">
+            64×64 Grid
+          </div>
+        </div>
+
+        <div class="metric-card">
+          <div class="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Measured Speedup vs RK4</div>
+          <div class="text-2xl font-bold font-mono text-slate-900" id="speedupMetric">Run Benchmark</div>
+          <div class="mt-2 inline-flex items-center text-[11px] font-semibold text-slate-600 bg-slate-100 border border-slate-200 px-2.5 py-0.5 rounded-full" id="speedupSub">
+            Run Tab 3 Benchmark or Scaling
+          </div>
+        </div>
+
+        <div class="metric-card">
+          <div class="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Model Validation MSE</div>
+          <div class="text-2xl font-bold font-mono text-slate-900" id="mseMetric">--</div>
+          <div class="mt-2 inline-flex items-center text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full" id="mseSub">
+            ~7.4% Zero-Shot Rel-L2
+          </div>
+        </div>
+
+        <div class="metric-card">
+          <div class="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Peak Vorticity &amp; Enstrophy</div>
+          <div class="text-2xl font-bold font-mono text-slate-900" id="peakVortMetric">--</div>
+          <div class="mt-2 inline-flex items-center text-[11px] font-semibold text-blue-700 bg-blue-50 border border-blue-200 px-2.5 py-0.5 rounded-full font-mono" id="enstrophySub">
+            Ω = --
+          </div>
+        </div>
+
+      </div>
+
+      <!-- 6-TAB NAVIGATION -->
+      <nav id="tabBar" class="tab-bar" aria-label="Simulation Modules">
+        <div id="tabSliderPill" class="tab-slider-pill" aria-hidden="true"></div>
+        <button type="button" class="tab-btn active" data-tab="tab-sim">
+          <i data-lucide="waves" class="w-4 h-4"></i>
+          <span>Fluid Field &amp; Rollout</span>
+        </button>
+        <button type="button" class="tab-btn" data-tab="tab-sr">
+          <i data-lucide="zoom-in" class="w-4 h-4"></i>
+          <span>Zero-Shot Super-Resolution</span>
+        </button>
+        <button type="button" class="tab-btn" data-tab="tab-race">
+          <i data-lucide="zap" class="w-4 h-4"></i>
+          <span>Benchmark &amp; CFL Scaling</span>
+        </button>
+        <button type="button" class="tab-btn" data-tab="tab-tta">
+          <i data-lucide="sparkles" class="w-4 h-4"></i>
+          <span>Live Test-Time Adaptation</span>
+        </button>
+        <button type="button" class="tab-btn" data-tab="tab-pso">
+          <i data-lucide="target" class="w-4 h-4"></i>
+          <span>Active Flow Control (PSO)</span>
+        </button>
+        <button type="button" class="tab-btn" data-tab="tab-arch">
+          <i data-lucide="cpu" class="w-4 h-4"></i>
+          <span>Architecture &amp; FAQs</span>
+        </button>
+      </nav>
+
+      <!-- ================================================================== -->
+      <!-- TAB 1: FLUID FIELD, ROLLOUT & STREAMLINES                           -->
+      <!-- ================================================================== -->
+      <section id="tab-sim" class="tab-content space-y-5">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 class="text-lg font-bold text-slate-900">Spatiotemporal Fluid Vorticity Simulation</h2>
+            <p class="text-xs text-slate-500">Locked symmetric colorbar across initial condition $a(x,y)$ and PINO prediction $u(x,y,T=1)$.</p>
+          </div>
+          <div class="flex flex-wrap items-center gap-4 text-xs font-semibold text-slate-700">
+            <label class="flex items-center space-x-1.5 cursor-pointer">
+              <input type="checkbox" id="streamlinesToggle" checked class="rounded text-blue-600 focus:ring-blue-500" />
+              <span>Velocity Quivers</span>
+            </label>
+            <label class="flex items-center space-x-1.5 cursor-pointer">
+              <input type="checkbox" id="particleFlowToggle" checked class="rounded text-blue-600 focus:ring-blue-500" />
+              <span>Live Particle Advection</span>
+            </label>
+            <label class="flex items-center space-x-1.5 cursor-pointer">
+              <input type="checkbox" id="surface3DToggle" class="rounded text-blue-600 focus:ring-blue-500" />
+              <span>3D Surface View</span>
+            </label>
+            <label class="flex items-center space-x-1.5 cursor-pointer">
+              <input type="checkbox" id="fftSpectrumToggle" class="rounded text-blue-600 focus:ring-blue-500" />
+              <span>2D FFT Spectrum View</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- 2D Dual Heatmap Grid -->
+        <div id="heatmap2DContainer" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div class="panel-card p-2.5">
+            <div class="text-xs font-bold text-slate-700 px-2 pt-1 flex items-center justify-between">
+              <span>Initial Vorticity Field $a(x, y)$ [t = 0]</span>
+              <span class="font-mono text-[11px] text-slate-400">Locked Scale</span>
+            </div>
+            <div id="initPlot" class="plot-stage"></div>
+          </div>
+          <div class="panel-card p-2.5">
+            <div class="text-xs font-bold text-blue-700 px-2 pt-1 flex items-center justify-between">
+              <span>PINO Predicted Vorticity $u(x, y, T)$ [t = 1.0]</span>
+              <span class="font-mono text-[11px] text-blue-500">Biot-Savart Quivers</span>
+            </div>
+            <div id="predPlot" class="plot-stage"></div>
+          </div>
+        </div>
+
+        <!-- Live 60 FPS Lagrangian Particle Advection Stage -->
+        <div id="particleFlowContainer" class="panel-card p-4 sm:p-5 space-y-3.5">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 class="text-sm font-bold text-slate-900 flex items-center">
+                <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse mr-2"></span>
+                Live 60 FPS Lagrangian Particle Advection (Biot-Savart Velocity Field)
+              </h3>
+              <p class="text-xs text-slate-500">
+                700 passive fluid tracers continuously advected by $\mathbf{u} = (\partial_y\psi, -\partial_x\psi)$ over the predicted vorticity field on $[0, 2\pi)^2$.
+              </p>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+              <label for="particleSpeedSelect" class="text-[11px] font-semibold text-slate-600">Speed:</label>
+              <select id="particleSpeedSelect" class="bg-white border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono font-semibold text-slate-800">
+                <option value="0.6">0.6×</option>
+                <option value="1.0" selected>1.0×</option>
+                <option value="1.8">1.8×</option>
+              </select>
+              <button type="button" id="particlePlayBtn" class="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold flex items-center space-x-1.5">
+                <i data-lucide="pause" class="w-3.5 h-3.5"></i>
+                <span>Pause</span>
+              </button>
+              <button type="button" id="particleResetBtn" class="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold">
+                Reseed Tracers
+              </button>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-12 gap-5 items-center">
+            <div class="md:col-span-5 flex justify-center">
+              <div class="particle-stage-wrap">
+                <canvas id="particleFlowCanvas" width="390" height="390"></canvas>
+              </div>
+            </div>
+            <div class="md:col-span-7 grid grid-cols-2 gap-3 text-xs">
+              <div class="bg-slate-50 border border-slate-200 rounded-xl p-3">
+                <div class="text-[11px] font-semibold text-slate-500 uppercase">Max Flow Speed $\|\mathbf{u}\|_\infty$</div>
+                <div id="particleMaxSpeed" class="text-lg font-bold font-mono text-slate-900 mt-1">--</div>
+                <div class="text-[11px] text-slate-500 mt-0.5">Biot-Savart Peak Velocity</div>
+              </div>
+              <div class="bg-slate-50 border border-slate-200 rounded-xl p-3">
+                <div class="text-[11px] font-semibold text-slate-500 uppercase">RMS Speed $\|\mathbf{u}\|_{\text{rms}}$</div>
+                <div id="particleRmsSpeed" class="text-lg font-bold font-mono text-blue-700 mt-1">--</div>
+                <div class="text-[11px] text-slate-500 mt-0.5">Mean Advective Transport</div>
+              </div>
+              <div class="col-span-2 bg-blue-50/70 border border-blue-200 rounded-xl p-3.5 text-xs text-slate-700 space-y-1.5">
+                <div class="font-bold text-slate-900 flex items-center justify-between">
+                  <span>How to Read This Real-Time Flow Canvas</span>
+                  <span class="font-mono text-[11px] text-blue-700">700 Tracers • Periodic Wrap</span>
+                </div>
+                <p>• <b class="text-red-700">Red zones ($+\omega$)</b> rotate tracers <b>counter-clockwise</b>; <b class="text-blue-700">Blue zones ($-\omega$)</b> rotate tracers <b>clockwise</b>.</p>
+                <p>• Drag any sidebar slider or paint custom vortices to watch streamlines and vortex rotation speed reconfigure immediately.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3D Surface View -->
+        <div id="surface3DContainer" class="hidden panel-card p-4">
+          <h4 class="text-xs font-bold text-slate-700 mb-2 uppercase tracking-wide">
+            Interactive 3D Vortex Topology (Click &amp; Drag to Rotate)
+          </h4>
+          <div id="surfacePlot" class="plot-stage-lg"></div>
+        </div>
+
+        <!-- 2D FFT Spectrum View -->
+        <div id="fft2Container" class="hidden panel-card p-4 space-y-2">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h4 class="text-xs font-bold text-slate-800 uppercase tracking-wide">
+                2D Fourier Magnitude Spectrum $\log_{10}(|\hat{u}(k_x, k_y)|/N + 10^{-6})$
+              </h4>
+              <p id="fft2Caption" class="text-[11px] text-slate-500">
+                Dashed box highlights the learned spectral mode window $k_x, k_y \in [-16, 16]$ where complex multipliers $R_\phi$ operate.
+              </p>
+            </div>
+            <span class="text-[11px] font-mono font-semibold text-blue-700 bg-blue-50 border border-blue-200 px-2.5 py-0.5 rounded-full">
+              k_max = 16 Cutoff Box
+            </span>
+          </div>
+          <div id="fft2PredPlot" class="plot-stage"></div>
+        </div>
+
+        <!-- Conservation Invariants Bar -->
+        <div id="invariantsBar" class="panel-card p-4 sm:p-5 bg-slate-50/70">
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-3.5">
+            <span class="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center leading-relaxed">
+              <i data-lucide="shield-check" class="w-4 h-4 mr-1.5 text-emerald-600 shrink-0"></i>
+              <span>Physical Conservation Invariants (Initial $t=0$ vs Predicted $t=1.0$)</span>
+            </span>
+            <span class="text-[11px] text-slate-500 font-mono">Periodic $[0, 2\pi)^2$ Domain</span>
+          </div>
+          <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+            <div class="bg-white border border-slate-200 rounded-lg p-3">
+              <div class="text-[11px] font-semibold text-slate-500">Circulation $\Gamma = \langle \omega \rangle$</div>
+              <div class="mt-1 font-mono font-bold text-slate-900 text-sm">
+                <span id="invCircInit">--</span> → <span id="invCircPred">--</span>
+              </div>
+              <div class="mt-1 text-[11px] font-mono text-slate-500" id="invCircDelta">Δ = --</div>
+            </div>
+            <div class="bg-white border border-slate-200 rounded-lg p-3">
+              <div class="text-[11px] font-semibold text-slate-500">Kinetic Energy $E = \frac{1}{2}\langle |\mathbf{u}|^2 \rangle$</div>
+              <div class="mt-1 font-mono font-bold text-slate-900 text-sm">
+                <span id="invEnergyInit">--</span> → <span id="invEnergyPred">--</span>
+              </div>
+              <div class="mt-1 text-[11px] font-mono text-slate-500" id="invEnergyDelta">Δ = --</div>
+            </div>
+            <div class="bg-white border border-slate-200 rounded-lg p-3">
+              <div class="text-[11px] font-semibold text-slate-500">Enstrophy $\Omega = \frac{1}{2}\langle \omega^2 \rangle$</div>
+              <div class="mt-1 font-mono font-bold text-slate-900 text-sm">
+                <span id="invEnstInit">--</span> → <span id="invEnstPred">--</span>
+              </div>
+              <div class="mt-1 text-[11px] font-mono text-slate-500" id="invEnstDelta">Δ = --</div>
+            </div>
+            <div class="bg-white border border-slate-200 rounded-lg p-3">
+              <div class="text-[11px] font-semibold text-slate-500">Peak Vorticity $\|\omega\|_\infty$</div>
+              <div class="mt-1 font-mono font-bold text-slate-900 text-sm">
+                <span id="invPeakInit">--</span> → <span id="invPeakPred">--</span>
+              </div>
+              <div class="mt-1 text-[11px] font-mono text-emerald-700">Viscous Dissipation</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Multi-Step Time Rollout Player Card -->
+        <div class="panel-card p-5 space-y-4">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 class="text-sm font-bold text-slate-900 flex items-center">
+                <i data-lucide="film" class="w-4 h-4 mr-2 text-blue-600"></i>
+                Multi-Step Autoregressive Time Rollout Player ($t = 0 \to 5$)
+              </h3>
+              <p class="text-xs text-slate-500">
+                Chains PINO step-by-step against the spectral RK4 solver over multiple integer time horizons.
+              </p>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+              <label for="rolloutFramesSelect" class="text-xs font-semibold text-slate-600">Frames:</label>
+              <select id="rolloutFramesSelect" class="bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-mono font-semibold text-slate-800">
+                <option value="4">4 (t = 0..3)</option>
+                <option value="5">5 (t = 0..4)</option>
+                <option value="6" selected>6 (t = 0..5)</option>
+                <option value="7">7 (t = 0..6)</option>
+                <option value="8">8 (t = 0..7)</option>
+              </select>
+              <button type="button" id="runRolloutBtn" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg shadow-sm transition flex items-center space-x-1.5 text-xs">
+                <i data-lucide="play-circle" class="w-4 h-4"></i>
+                <span>Simulate Time Rollout (t = 0 → 5)</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Rollout Summary & Playback Controls -->
+          <div id="rolloutControlsBar" class="hidden flex flex-wrap items-center justify-between gap-4 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3">
+            <div class="flex items-center space-x-3 flex-1 min-w-[260px]">
+              <button type="button" id="rolloutPlayBtn" class="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold flex items-center space-x-1.5 transition shrink-0">
+                <i data-lucide="play" class="w-3.5 h-3.5"></i>
+                <span>Play</span>
+              </button>
+              <input type="range" id="rolloutSlider" min="0" max="5" step="1" value="0" class="w-full cursor-pointer" />
+              <span id="rolloutTimeLabel" class="text-xs font-mono font-bold text-slate-800 whitespace-nowrap">t = 0.0 / 5.0</span>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-3 text-xs">
+              <div class="flex items-center space-x-1.5">
+                <span class="font-semibold text-slate-600">FPS:</span>
+                <select id="rolloutFpsSelect" class="bg-white border border-slate-300 rounded-md px-2 py-1 text-xs font-mono font-semibold text-slate-800">
+                  <option value="1">1 FPS</option>
+                  <option value="2" selected>2 FPS</option>
+                  <option value="4">4 FPS</option>
+                  <option value="8">8 FPS</option>
+                </select>
+              </div>
+              <span id="rolloutPinoMs" class="font-mono font-semibold text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-md">PINO: -- ms</span>
+              <span id="rolloutRk4Ms" class="font-mono font-semibold text-slate-700 bg-white border border-slate-200 px-2 py-0.5 rounded-md">RK4: -- ms</span>
+              <span id="rolloutSpeedup" class="font-mono font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md">--×</span>
+            </div>
+          </div>
+
+          <!-- Rollout Plots -->
+          <div id="rolloutPlotsContainer" class="hidden space-y-4">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div class="border border-slate-200 rounded-xl p-2 bg-white">
+                <div class="text-xs font-bold text-slate-700 px-2 pt-1">RK4 Reference Solver Trajectory</div>
+                <div id="rolloutRk4Plot" class="plot-stage-sm"></div>
+              </div>
+              <div class="border border-slate-200 rounded-xl p-2 bg-white">
+                <div class="text-xs font-bold text-blue-700 px-2 pt-1">PINO Autoregressive Trajectory</div>
+                <div id="rolloutPinoPlot" class="plot-stage-sm"></div>
+              </div>
+            </div>
+            <div class="border border-slate-200 rounded-xl p-3 bg-white">
+              <div class="text-xs font-bold text-slate-700 px-1 mb-1">Enstrophy Decay &amp; Relative L2 Drift vs Time</div>
+              <div id="rolloutMetricsPlot" class="plot-stage-sm"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================================================================== -->
+      <!-- TAB 2: ZERO-SHOT SUPER-RESOLUTION                                  -->
+      <!-- ================================================================== -->
+      <section id="tab-sr" class="tab-content hidden space-y-5">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 class="text-lg font-bold text-slate-900">Zero-Shot Super-Resolution (Discretization Invariance)</h2>
+            <p class="text-xs text-slate-500">
+              Compares native 64×64 PINO output, classical Bicubic interpolation, and direct Zero-Shot PINO continuous evaluation at higher mesh resolution.
+            </p>
+          </div>
+          <div class="flex items-center space-x-2">
+            <span class="text-xs font-semibold text-slate-600">Target Grid:</span>
+            <button type="button" class="sr-res-btn px-2.5 py-1.5 text-xs font-mono font-semibold rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50" data-sr-res="128">128²</button>
+            <button type="button" class="sr-res-btn px-2.5 py-1.5 text-xs font-mono font-semibold rounded-lg border border-blue-600 bg-blue-50 text-blue-700" data-sr-res="256">256²</button>
+            <button type="button" id="refreshSrBtn" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold flex items-center space-x-1.5 transition">
+              <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+              <span>Evaluate Super-Res</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Super-Resolution KPI Banner -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div class="bg-slate-50 border border-slate-200 rounded-xl p-3.5">
+            <div class="text-[11px] font-semibold text-slate-500 uppercase">Native 64² PINO Latency</div>
+            <div class="text-xl font-bold font-mono text-slate-900 mt-1" id="srTime64">-- ms</div>
+          </div>
+          <div class="bg-blue-50 border border-blue-200 rounded-xl p-3.5">
+            <div class="text-[11px] font-semibold text-blue-700 uppercase"><span id="srHighResLabel">256²</span> Zero-Shot Latency</div>
+            <div class="text-xl font-bold font-mono text-blue-900 mt-1" id="srTimeHigh">-- ms</div>
+          </div>
+          <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-3.5">
+            <div class="text-[11px] font-semibold text-emerald-700 uppercase">Mesh Consistency Rel-L2</div>
+            <div class="text-xl font-bold font-mono text-emerald-900 mt-1" id="srConsistencyErr">--%</div>
+          </div>
+          <div class="bg-slate-50 border border-slate-200 rounded-xl p-3.5">
+            <div class="text-[11px] font-semibold text-slate-500 uppercase">Learned Fourier Box</div>
+            <div class="text-xl font-bold font-mono text-slate-900 mt-1" id="srModesCutoff">k ∈ [-16, 16]²</div>
+          </div>
+        </div>
+
+        <!-- 3-Panel Full-Field Comparison -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div class="panel-card p-2.5">
+            <div class="text-xs font-bold text-slate-700 px-2 pt-1">1. Native 64×64 PINO Prediction</div>
+            <div id="srBase64Plot" class="plot-stage-sm"></div>
+          </div>
+          <div class="panel-card p-2.5">
+            <div id="srHighTitle1" class="text-xs font-bold text-amber-700 px-2 pt-1">2. Bicubic Upsample (256×256)</div>
+            <div id="srBicubicPlot" class="plot-stage-sm"></div>
+          </div>
+          <div class="panel-card p-2.5">
+            <div id="srHighTitle2" class="text-xs font-bold text-blue-700 px-2 pt-1">3. Zero-Shot PINO (256×256)</div>
+            <div id="srZeroShotPlot" class="plot-stage-sm"></div>
+          </div>
+        </div>
+
+        <!-- Interactive Split-Screen Wipe Comparator (Tab 2) -->
+        <div id="srWipeCard" class="panel-card p-4 sm:p-5 space-y-3">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 class="text-sm font-bold text-slate-900 flex items-center">
+                <i data-lucide="split-square-horizontal" class="w-4 h-4 mr-2 text-blue-600"></i>
+                Interactive Split-Screen Motion Wipe: Bicubic vs. Zero-Shot PINO
+              </h3>
+              <p class="text-xs text-slate-500">Drag directly across the canvas or scrub the slider below to compare sharpness on identical locked color scales.</p>
+            </div>
+            <span id="srWipePctLabel" class="text-xs font-mono font-bold text-blue-700 bg-blue-50 border border-blue-200 px-2.5 py-0.5 rounded-full">Split: 50%</span>
+          </div>
+          <div id="srWipeStage" class="wipe-stage">
+            <canvas id="srWipeRight" class="wipe-canvas" width="440" height="440"></canvas>
+            <div id="srWipeOverlay" class="wipe-overlay-layer">
+              <canvas id="srWipeLeft" class="wipe-canvas" width="440" height="440"></canvas>
+            </div>
+            <span id="srWipeLeftBadge" class="wipe-badge wipe-badge-left">Bicubic 256²</span>
+            <span id="srWipeRightBadge" class="wipe-badge wipe-badge-right">Zero-Shot PINO 256²</span>
+            <div id="srWipeDivider" class="wipe-divider">
+              <div class="wipe-thumb">↔</div>
+            </div>
+          </div>
+          <div class="max-w-[440px] mx-auto flex items-center space-x-3">
+            <span class="text-[11px] font-mono font-semibold text-amber-700">Bicubic</span>
+            <input type="range" id="srWipeSlider" min="0" max="100" value="50" class="w-full cursor-pointer" />
+            <span class="text-[11px] font-mono font-semibold text-blue-700">PINO</span>
+          </div>
+        </div>
+
+        <!-- 3-Panel Center 64x64 Zoomed Detail Crops -->
+        <div>
+          <h3 class="text-xs font-bold uppercase tracking-wider text-slate-700 mb-2.5 flex items-center">
+            <i data-lucide="search" class="w-3.5 h-3.5 mr-1.5 text-blue-600"></i>
+            Center 64×64 Zoomed Detail Crops (Locked Colorbar Scale)
+          </h3>
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div class="panel-card p-2.5">
+              <div class="text-xs font-bold text-slate-600 px-2 pt-1">Crop A: Nearest-Neighbor Upsample</div>
+              <div id="srCropNearestPlot" class="plot-stage-sm"></div>
+            </div>
+            <div class="panel-card p-2.5">
+              <div class="text-xs font-bold text-amber-700 px-2 pt-1">Crop B: Bicubic Interpolation</div>
+              <div id="srCropBicubicPlot" class="plot-stage-sm"></div>
+            </div>
+            <div class="panel-card p-2.5">
+              <div class="text-xs font-bold text-blue-700 px-2 pt-1">Crop C: Zero-Shot PINO Evaluation</div>
+              <div id="srCropPinoPlot" class="plot-stage-sm"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Radial Energy Spectrum Comparison -->
+        <div class="panel-card p-4">
+          <div class="text-xs font-bold text-slate-800 mb-1">Radial Energy Spectrum $E(k)$: 64×64 vs Zero-Shot High-Res</div>
+          <div id="srSpectrumPlot" class="plot-stage-sm"></div>
+        </div>
+
+        <div class="bg-blue-50 border border-blue-200 rounded-xl p-4 text-xs text-blue-900 space-y-1">
+          <p class="font-bold flex items-center">
+            <i data-lucide="info" class="w-4 h-4 mr-1.5 text-blue-600"></i>
+            Discretization Invariance Principle ($k \in [-16, 16]^2$):
+          </p>
+          <p>
+            Spectral convolution weights $R_\phi$ are parameterized on continuous low-frequency wave numbers
+            <span class="font-mono font-semibold">k ∈ [-16, 16]²</span>. At $128\times 128$ or $256\times 256$ target meshes, the higher modes are zero-padded in Fourier space prior to the Inverse FFT ($\mathrm{irfft2}$), yielding exact continuous trigonometric polynomial evaluation rather than grid-bound pixel interpolation.
+          </p>
+        </div>
+      </section>
+
+      <!-- ================================================================== -->
+      <!-- TAB 3: BENCHMARK DRAG RACE, SPECTRUM & SCALING                     -->
+      <!-- ================================================================== -->
+      <section id="tab-race" class="tab-content hidden space-y-5">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 class="text-lg font-bold text-slate-900">Benchmark Drag Race, Energy Spectrum &amp; CFL Scaling Law</h2>
+            <p class="text-xs text-slate-500">
+              Compares pseudo-spectral 4th-Order Runge-Kutta (RK4) integration against PINO at $64^2$ and measures CFL multi-resolution scaling up to $256^2$.
+            </p>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <button type="button" id="startRaceBtn" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg shadow-sm transition flex items-center space-x-2 text-xs">
+              <i data-lucide="play" class="w-3.5 h-3.5"></i>
+              <span>Run 64² Benchmark Race</span>
+            </button>
+            <button type="button" id="startScalingBtn" class="bg-slate-900 hover:bg-slate-800 text-white font-semibold py-2 px-4 rounded-lg shadow-sm transition flex items-center space-x-2 text-xs">
+              <i data-lucide="trending-up" class="w-3.5 h-3.5"></i>
+              <span>Run CFL Scaling Law (64² → 256²)</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Race KPI Banner (5 Cards) -->
+        <div id="raceResultsBanner" class="hidden grid grid-cols-2 md:grid-cols-5 gap-3">
+          <div class="bg-slate-50 border border-slate-200 rounded-xl p-3.5">
+            <div class="text-[11px] font-semibold text-slate-500 uppercase">RK4 Solver (64²)</div>
+            <div class="text-xl font-bold font-mono text-slate-900 mt-1" id="rk4Time">-- ms</div>
+            <div class="text-[11px] text-slate-500 mt-1">50-Step Spectral RK4</div>
+          </div>
+          <div class="bg-blue-50 border border-blue-200 rounded-xl p-3.5">
+            <div class="text-[11px] font-semibold text-blue-700 uppercase">PINO Operator</div>
+            <div class="text-xl font-bold font-mono text-blue-900 mt-1" id="pinoTime">-- ms</div>
+            <div class="text-[11px] font-bold text-blue-700 mt-1" id="speedupBadge">--× Faster</div>
+          </div>
+          <div class="bg-indigo-50 border border-indigo-200 rounded-xl p-3.5">
+            <div class="text-[11px] font-semibold text-indigo-700 uppercase">Rel-L2 &amp; MSE</div>
+            <div class="text-xl font-bold font-mono text-indigo-900 mt-1" id="raceRelL2">--%</div>
+            <div class="text-[11px] font-mono text-indigo-700 mt-1" id="raceErrDetail">MSE: --</div>
+          </div>
+          <div class="bg-slate-50 border border-slate-200 rounded-xl p-3.5">
+            <div class="text-[11px] font-semibold text-slate-500 uppercase">Circulation Drift</div>
+            <div class="text-xl font-bold font-mono text-slate-900 mt-1" id="circDrift">--%</div>
+            <div class="text-[11px] font-mono text-slate-500 mt-1" id="energyDrift">E Drift: --%</div>
+          </div>
+          <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-3.5">
+            <div class="text-[11px] font-semibold text-emerald-700 uppercase">Exact PDE Residual</div>
+            <div class="text-xl font-bold font-mono text-emerald-900 mt-1" id="racePdeRes">--</div>
+            <div class="text-[11px] text-emerald-700 mt-1">RMS Spectral Residual</div>
+          </div>
+        </div>
+
+        <!-- 3-Panel Locked-Scale Heatmaps -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div class="panel-card p-2.5">
+            <div class="text-xs font-bold text-slate-700 px-2 pt-1">1. RK4 Classical Solver (Ground Truth)</div>
+            <div id="raceRk4Plot" class="plot-stage-sm"></div>
+          </div>
+          <div class="panel-card p-2.5">
+            <div class="text-xs font-bold text-blue-700 px-2 pt-1">2. PINO Model Prediction</div>
+            <div id="racePinoPlot" class="plot-stage-sm"></div>
+          </div>
+          <div class="panel-card p-2.5">
+            <div class="text-xs font-bold text-red-700 px-2 pt-1">3. Point-Wise Absolute Error $|\hat{u} - u_{\mathrm{rk4}}|$</div>
+            <div id="raceErrPlot" class="plot-stage-sm"></div>
+          </div>
+        </div>
+
+        <!-- 2-Column Analytics Row -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div class="panel-card p-4">
+            <div class="text-xs font-bold text-slate-800 mb-1">Radial Energy Spectrum $E(k)$ (Log-Log, RK4 vs PINO)</div>
+            <div id="raceSpectrumPlot" class="plot-stage-sm"></div>
+          </div>
+          <div class="panel-card p-4 relative">
+            <div class="text-xs font-bold text-slate-800 mb-1">CFL Multi-Resolution Scaling Law ($64^2 \to 128^2 \to 256^2$)</div>
+            <div id="raceScalingPlot" class="plot-stage-sm"></div>
+            <div id="scalingEmptyOverlay" class="absolute inset-0 top-10 flex items-center justify-center pointer-events-none">
+              <span class="text-xs font-medium text-slate-400 bg-white/90 border border-slate-200 rounded-lg px-3 py-1.5">
+                Click "Run CFL Scaling Law (64² → 256²)" to benchmark multi-resolution speedups
+              </span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================================================================== -->
+      <!-- TAB 4: LIVE TEST-TIME ADAPTATION (TTA)                             -->
+      <!-- ================================================================== -->
+      <section id="tab-tta" class="tab-content hidden space-y-5">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 class="text-lg font-bold text-slate-900">Live Unsupervised Test-Time Adaptation (TTA)</h2>
+            <p class="text-xs text-slate-500">
+              Fine-tunes only the local MLP projection head on a single OOD flow instance using exact spectral PDE residuals—zero ground-truth labels required.
+            </p>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <button type="button" id="ttaDipoleBtn" class="px-3 py-2 rounded-lg text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100 transition">
+              OOD Dipole + TTA
+            </button>
+            <button type="button" id="ttaShearBtn" class="px-3 py-2 rounded-lg text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100 transition">
+              OOD Shear + TTA
+            </button>
+            <button type="button" id="startTtaBtn" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg shadow-sm transition flex items-center space-x-2 text-xs">
+              <i data-lucide="sparkles" class="w-3.5 h-3.5"></i>
+              <span>Run TTA on Current Flow</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- TTA Controls -->
+        <div class="control-card p-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <div class="flex justify-between text-xs font-semibold text-slate-700 mb-1">
+              <span>Gradient Steps</span>
+              <span id="ttaStepsVal" class="text-blue-600 font-mono">10</span>
+            </div>
+            <input type="range" id="ttaStepsInput" min="5" max="25" step="1" value="10" class="w-full cursor-pointer" />
+          </div>
+
+          <div>
+            <label for="ttaLrSelect" class="block text-xs font-semibold text-slate-700 mb-1">Learning Rate (Adam, Projection Only)</label>
+            <select id="ttaLrSelect" class="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-xs font-mono font-semibold text-slate-800">
+              <option value="0.00001">1e-5</option>
+              <option value="0.00005">5e-5</option>
+              <option value="0.0001" selected>1e-4 (Default)</option>
+              <option value="0.0005">5e-4</option>
+            </select>
+          </div>
+
+          <div>
+            <div class="flex justify-between text-xs font-semibold text-slate-700 mb-1">
+              <span>Spatial Anchor ($\alpha_{\text{anchor}}$)</span>
+              <span id="ttaAlphaVal" class="text-blue-600 font-mono">0.5</span>
+            </div>
+            <input type="range" id="ttaAlphaInput" min="0.1" max="2.0" step="0.1" value="0.5" class="w-full cursor-pointer" />
+          </div>
+        </div>
+
+        <!-- TTA KPI Banner -->
+        <div id="ttaResultsBanner" class="hidden grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-3.5">
+            <div class="text-[11px] font-semibold text-emerald-700 uppercase">PDE Residual (Before → After)</div>
+            <div class="text-base font-bold font-mono text-emerald-950 mt-1">
+              <span id="ttaPdeBefore">--</span> → <span id="ttaPdeAfter">--</span>
+            </div>
+            <div class="text-[11px] font-bold text-emerald-700 mt-1" id="ttaPdeDrop">--% reduction</div>
+          </div>
+
+          <div class="bg-blue-50 border border-blue-200 rounded-xl p-3.5">
+            <div class="text-[11px] font-semibold text-blue-700 uppercase">Post-Hoc Rel-L2 (Before → After)</div>
+            <div class="text-base font-bold font-mono text-blue-950 mt-1">
+              <span id="ttaRelBefore">--%</span> → <span id="ttaRelAfter">--%</span>
+            </div>
+            <div class="text-[11px] font-semibold text-blue-700 mt-1" id="ttaRelDelta">Δ = --%</div>
+          </div>
+
+          <div class="bg-slate-50 border border-slate-200 rounded-xl p-3.5">
+            <div class="text-[11px] font-semibold text-slate-500 uppercase">Circulation Drift</div>
+            <div class="text-base font-bold font-mono text-slate-900 mt-1">
+              <span id="ttaCircBefore">--%</span> → <span id="ttaCircAfter">--%</span>
+            </div>
+            <div class="text-[11px] text-slate-500 mt-1">Mass Conservation Regularized</div>
+          </div>
+
+          <div class="bg-slate-50 border border-slate-200 rounded-xl p-3.5">
+            <div class="text-[11px] font-semibold text-slate-500 uppercase">TTA Execution Time</div>
+            <div class="text-xl font-bold font-mono text-slate-900 mt-1" id="ttaRuntime">-- ms</div>
+            <div class="text-[11px] text-slate-500 mt-1" id="ttaStepsLabel">10 projection updates</div>
+          </div>
+        </div>
+
+        <!-- Explanatory Note -->
+        <div class="bg-blue-50 border border-blue-200 rounded-xl p-3.5 text-xs text-blue-900 flex items-start space-x-2.5">
+          <i data-lucide="shield" class="w-4 h-4 text-blue-600 shrink-0 mt-0.5"></i>
+          <div>
+            <b>Zero Ground-Truth Labels &amp; Safe Weight Restoration:</b>
+            During adaptation, only the unsupervised spectral Navier-Stokes residual $\mathcal{P}([\omega_0, u_\theta])$, anchor penalty $\|u_\theta - u_{\text{base}}\|_2^2$, and circulation conservation $(\bar{u}_\theta - \bar{\omega}_0)^2$ are minimized over <span class="font-mono">model.projection</span>. RK4 is evaluated strictly post-hoc for error comparison, and base checkpoint weights are atomically restored afterward.
+          </div>
+        </div>
+
+        <!-- Before vs After Error Heatmaps + Convergence Curve -->
+        <div id="ttaEmptyOverlay" class="bg-slate-50 border border-dashed border-slate-300 rounded-xl p-4 text-center text-xs text-slate-500">
+          Select adaptation parameters above and click <b>Run TTA on Current Flow</b> or an <b>OOD Quick Button</b> to inspect test-time physics adaptation.
+        </div>
+
+        <!-- Interactive Before/After TTA Error Wipe Comparator (Tab 4) -->
+        <div id="ttaWipeCard" class="hidden panel-card p-4 sm:p-5 space-y-3">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 class="text-sm font-bold text-slate-900 flex items-center">
+                <i data-lucide="split-square-horizontal" class="w-4 h-4 mr-2 text-emerald-600"></i>
+                Interactive TTA Error Wipe: Before vs. After Adaptation
+              </h3>
+              <p class="text-xs text-slate-500">Swipe horizontally to inspect localized $|u - u_{\mathrm{rk4}}|$ error reduction on locked error bounds.</p>
+            </div>
+            <span id="ttaWipePctLabel" class="text-xs font-mono font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full">Split: 50%</span>
+          </div>
+          <div id="ttaWipeStage" class="wipe-stage">
+            <canvas id="ttaWipeRight" class="wipe-canvas" width="440" height="440"></canvas>
+            <div id="ttaWipeOverlay" class="wipe-overlay-layer">
+              <canvas id="ttaWipeLeft" class="wipe-canvas" width="440" height="440"></canvas>
+            </div>
+            <span class="wipe-badge wipe-badge-left">Before TTA |err|</span>
+            <span class="wipe-badge wipe-badge-right" style="color:#047857;border-color:#A7F3D0;">After TTA |err|</span>
+            <div id="ttaWipeDivider" class="wipe-divider">
+              <div class="wipe-thumb" style="border-color:#059669;color:#059669;">↔</div>
+            </div>
+          </div>
+          <div class="max-w-[440px] mx-auto flex items-center space-x-3">
+            <span class="text-[11px] font-mono font-semibold text-slate-600">Before TTA</span>
+            <input type="range" id="ttaWipeSlider" min="0" max="100" value="50" class="w-full cursor-pointer" />
+            <span class="text-[11px] font-mono font-semibold text-emerald-700">After TTA</span>
+          </div>
+        </div>
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div class="panel-card p-2.5">
+            <div class="text-xs font-bold text-slate-700 px-2 pt-1">Before TTA: $|u_{\text{zero-shot}} - u_{\text{rk4}}|$</div>
+            <div id="ttaErrBeforePlot" class="plot-stage-sm"></div>
+          </div>
+          <div class="panel-card p-2.5">
+            <div class="text-xs font-bold text-emerald-700 px-2 pt-1">After TTA: $|u_{\text{adapted}} - u_{\text{rk4}}|$</div>
+            <div id="ttaErrAfterPlot" class="plot-stage-sm"></div>
+          </div>
+          <div class="panel-card p-2.5">
+            <div class="text-xs font-bold text-blue-700 px-2 pt-1">Physics Loss &amp; PDE Residual Convergence</div>
+            <div id="ttaCurvePlot" class="plot-stage-sm"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================================================================== -->
+      <!-- TAB 5: ACTIVE FLOW CONTROL (PSO)                                   -->
+      <!-- ================================================================== -->
+      <section id="tab-pso" class="tab-content hidden space-y-5">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 class="text-lg font-bold text-slate-900">Active Flow Control via Particle Swarm Optimization (PSO)</h2>
+            <p class="text-xs text-slate-500">
+              Vectorized GPU/MPS surrogate search discovering an amplitude-bounded optimal forcing profile $f^*(x, y)$ that suppresses fluid enstrophy.
+            </p>
+          </div>
+          <button type="button" id="startPsoBtn" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-5 rounded-lg shadow-sm transition flex items-center space-x-2 text-xs">
+            <i data-lucide="play" class="w-3.5 h-3.5"></i>
+            <span>Optimize Forcing Profile f*(x, y)</span>
+          </button>
+        </div>
+
+        <!-- PSO Controls -->
+        <div class="control-card p-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <div class="flex justify-between text-xs font-semibold text-slate-700 mb-1">
+              <span>Swarm Size (Particles)</span>
+              <span id="psoParticlesVal" class="text-blue-600 font-mono">50</span>
+            </div>
+            <input type="range" id="psoParticlesInput" min="20" max="100" step="10" value="50" class="w-full cursor-pointer" />
+          </div>
+          <div>
+            <div class="flex justify-between text-xs font-semibold text-slate-700 mb-1">
+              <span>PSO Iterations</span>
+              <span id="psoIterationsVal" class="text-blue-600 font-mono">12</span>
+            </div>
+            <input type="range" id="psoIterationsInput" min="5" max="25" step="1" value="12" class="w-full cursor-pointer" />
+          </div>
+          <div>
+            <div class="flex justify-between text-xs font-semibold text-slate-700 mb-1">
+              <span>Forcing Budget ($\|f\|_\infty$)</span>
+              <span id="psoBoundVal" class="text-blue-600 font-mono">0.50</span>
+            </div>
+            <input type="range" id="psoBoundInput" min="0.10" max="1.50" step="0.05" value="0.50" class="w-full cursor-pointer" />
+          </div>
+        </div>
+
+        <!-- PSO KPI Banner -->
+        <div id="psoResultsBanner" class="hidden grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div class="metric-card">
+            <div class="text-[11px] font-semibold text-slate-500 uppercase">Total Evaluations</div>
+            <div class="text-xl font-bold font-mono text-slate-900 mt-1" id="psoEvals">--</div>
+            <div class="text-[11px] text-slate-500 mt-1">Vectorized Batched Surrogate</div>
+          </div>
+          <div class="metric-card">
+            <div class="text-[11px] font-semibold text-slate-500 uppercase">Latency &amp; Throughput</div>
+            <div class="text-xl font-bold font-mono text-slate-900 mt-1" id="psoLatency">-- ms</div>
+            <div class="text-[11px] font-mono text-blue-700 font-semibold mt-1" id="psoRate">-- evals/s</div>
+          </div>
+          <div class="metric-card">
+            <div class="text-[11px] font-semibold text-slate-500 uppercase">Enstrophy Suppression</div>
+            <div class="text-xl font-bold font-mono text-emerald-600 mt-1" id="psoSuppression">--%</div>
+            <div class="text-[11px] font-mono text-slate-600 mt-1" id="psoFitnessDetail">Base → Opt</div>
+          </div>
+          <div class="metric-card">
+            <div class="text-[11px] font-semibold text-slate-500 uppercase">Actuator Forcing Norms</div>
+            <div class="text-xl font-bold font-mono text-slate-900 mt-1" id="psoBudgetInfo">||f*||∞ = --</div>
+            <div class="text-[11px] font-mono text-slate-500 mt-1" id="psoL2Info">||f*||₂ = --</div>
+          </div>
+        </div>
+
+        <!-- 3-Panel Visual Row -->
+        <div id="psoEmptyOverlay" class="bg-slate-50 border border-dashed border-slate-300 rounded-xl p-4 text-center text-xs text-slate-500">
+          Configure swarm parameters above and click <b>Optimize Forcing Profile f*(x, y)</b> to run active flow control.
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div class="panel-card p-2.5">
+            <div class="text-xs font-bold text-slate-700 px-2 pt-1">1. Uncontrolled Flow $\omega_{\text{base}}$</div>
+            <div id="psoUncontrolledPlot" class="plot-stage-sm"></div>
+          </div>
+          <div class="panel-card p-2.5">
+            <div class="text-xs font-bold text-purple-700 px-2 pt-1">2. Optimal Forcing $f^*(x, y)$</div>
+            <div id="psoForcingPlot" class="plot-stage-sm"></div>
+          </div>
+          <div class="panel-card p-2.5">
+            <div class="text-xs font-bold text-emerald-700 px-2 pt-1">3. Controlled Flow $\omega_{\text{ctrl}}$</div>
+            <div id="psoControlledPlot" class="plot-stage-sm"></div>
+          </div>
+        </div>
+
+        <!-- PSO Convergence Curve -->
+        <div class="panel-card p-4">
+          <div class="text-xs font-bold text-slate-800 mb-1">PSO Swarm Fitness Convergence (Global Best &amp; Swarm Mean vs Iteration)</div>
+          <div id="psoConvergencePlot" class="plot-stage-sm"></div>
+        </div>
+      </section>
+
+      <!-- ================================================================== -->
+      <!-- TAB 6: ARCHITECTURE & FAQS                                         -->
+      <!-- ================================================================== -->
+      <section id="tab-arch" class="tab-content hidden space-y-6">
+        <div>
+          <h2 class="text-lg font-bold text-slate-900">PINO2D Architecture, Governing Physics &amp; FAQs</h2>
+          <p class="text-xs text-slate-500">Live tensor topology inspected directly from the loaded PyTorch checkpoint via <span class="font-mono">/api/info</span>.</p>
+        </div>
+
+        <!-- Inline SVG Architecture Diagram -->
+        <div class="panel-card p-5 space-y-4">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <h3 class="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center">
+              <i data-lucide="network" class="w-4 h-4 mr-1.5 text-blue-600"></i>
+              PINO2D Operator Dataflow Diagram
+            </h3>
+            <span id="archTotalParamsBadge" class="text-xs font-mono font-bold text-blue-700 bg-blue-50 border border-blue-200 px-3 py-0.5 rounded-full">
+              Total Parameters: --
+            </span>
+          </div>
+          <div id="archSvgContainer" class="overflow-x-auto pb-2"></div>
+
+          <!-- Live Layer Breakdown Table -->
+          <details class="border border-slate-200 rounded-lg bg-slate-50/60">
+            <summary class="px-4 py-2.5 text-xs font-bold text-slate-700 cursor-pointer flex items-center justify-between">
+              <span>Inspect Parameter Breakdown by Module (/api/info)</span>
+              <i data-lucide="chevron-down" class="w-4 h-4 text-slate-500"></i>
+            </summary>
+            <div class="overflow-x-auto border-t border-slate-200 bg-white rounded-b-lg">
+              <table class="w-full text-left text-xs">
+                <thead class="bg-slate-50 text-slate-500 uppercase text-[11px]">
+                  <tr>
+                    <th class="px-4 py-2 font-semibold">Module / Layer</th>
+                    <th class="px-4 py-2 font-semibold">Tensor Shape</th>
+                    <th class="px-4 py-2 font-semibold text-right">Parameters</th>
+                  </tr>
+                </thead>
+                <tbody id="archLayersTableBody" class="divide-y divide-slate-100 font-mono text-slate-700"></tbody>
+              </table>
+            </div>
+          </details>
+        </div>
+
+        <!-- KaTeX Governing Equations -->
+        <div class="space-y-3">
+          <h3 class="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center">
+            <i data-lucide="sigma" class="w-4 h-4 mr-1.5 text-blue-600"></i>
+            Governing Equations &amp; Algorithmic Formulations
+          </h3>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="panel-card p-4">
+              <div class="text-xs font-bold text-slate-800 mb-1">1. 2D Incompressible Navier-Stokes ($\omega$–$\psi$)</div>
+              <div class="katex-box text-sm">
+                $$\frac{\partial \omega}{\partial t} + \mathbf{u} \cdot \nabla \omega = \nu \nabla^2 \omega + f(x, y)$$
+                $$-\nabla^2 \psi = \omega, \quad \mathbf{u} = \left(\frac{\partial \psi}{\partial y},\, -\frac{\partial \psi}{\partial x}\right)$$
+              </div>
+            </div>
+
+            <div class="panel-card p-4">
+              <div class="text-xs font-bold text-slate-800 mb-1">2. Spectral Convolution Layer ($k_{\max} = 16$)</div>
+              <div class="katex-box text-sm">
+                $$v_{l+1}(x) = \sigma\!\left(W_l v_l(x) + \mathcal{F}^{-1}\!\left(R_{\phi, l}(k) \cdot \mathcal{F}(v_l)(k)\right)(x)\right)$$
+                $$|k_x|, |k_y| \le k_{\max} = 16$$
+              </div>
+            </div>
+
+            <div class="panel-card p-4">
+              <div class="text-xs font-bold text-slate-800 mb-1">3. Exact Fourier Derivatives &amp; Biot-Savart</div>
+              <div class="katex-box text-sm">
+                $$\widehat{\partial_x \omega}(k) = i k_x \hat{\omega}(k), \quad \widehat{\nabla^2 \omega}(k) = -|k|^2 \hat{\omega}(k)$$
+                $$\hat{\psi}(k) = \frac{\hat{\omega}(k)}{|k|^2}\;\;(k \neq 0), \quad \text{2/3 Orszag Dealiasing}$$
+              </div>
+            </div>
+
+            <div class="panel-card p-4">
+              <div class="text-xs font-bold text-slate-800 mb-1">4. Multi-Objective PINO Training Loss</div>
+              <div class="katex-box text-sm">
+                $$\mathcal{L}_{\text{PINO}} = \lambda_{\text{data}} \frac{\|\hat{u} - u\|_2}{\|u\|_2} + \lambda_{\text{ic}} \frac{\|\hat{u}_0 - a\|_2}{\|a\|_2} + \lambda_{\text{pde}} \|\mathcal{P}(\hat{u})\|_2$$
+              </div>
+            </div>
+
+            <div class="panel-card p-4">
+              <div class="text-xs font-bold text-slate-800 mb-1">5. Test-Time Adaptation Loss (Projection-Only)</div>
+              <div class="katex-box text-sm">
+                $$\begin{aligned}
+                \mathcal{L}_{\text{TTA}}(\theta_{\text{proj}}) &= \|\mathcal{P}([\omega_0, u_\theta])\|_2^2 \\
+                &\quad + \alpha_{\text{anchor}} \|u_\theta - u_{\text{base}}\|_2^2 + \beta_{\text{circ}} (\bar{u}_\theta - \bar{\omega}_0)^2
+                \end{aligned}$$
+              </div>
+            </div>
+
+            <div class="panel-card p-4">
+              <div class="text-xs font-bold text-slate-800 mb-1">6. Vectorized PSO Surrogate Control Update</div>
+              <div class="katex-box text-sm">
+                $$v_i^{(t+1)} = w v_i^{(t)} + c_1 r_1 (p_i - x_i^{(t)}) + c_2 r_2 (g - x_i^{(t)})$$
+                $$x_i^{(t+1)} = \operatorname{clip}\!\left(x_i^{(t)} + v_i^{(t+1)},\, -\|f\|_\infty,\, \|f\|_\infty\right)$$
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Expandable FAQs Accordion -->
+        <div class="space-y-3">
+          <h3 class="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center">
+            <i data-lucide="graduation-cap" class="w-4 h-4 mr-1.5 text-blue-600"></i>
+            Frequently Asked Questions (FAQs)
+          </h3>
+
+          <div class="space-y-2.5">
+            <div class="viva-item panel-card">
+              <details open class="group">
+                <summary class="px-4 py-3 flex items-center justify-between text-xs sm:text-sm font-bold text-slate-900">
+                  <span>1. How do Validation MSE (~0.0049) and Relative L2 Error (~7.0–7.4%) relate mathematically?</span>
+                  <i data-lucide="chevron-down" class="viva-chevron w-4 h-4 text-slate-500 shrink-0"></i>
+                </summary>
+                <div class="px-4 pb-3.5 text-xs text-slate-600 leading-relaxed border-t border-slate-100 pt-2.5">
+                  The saved checkpoint validation MSE (<span class="font-mono">0.0049</span>) measures mean squared error, whereas Relative $L_2$ measures $\|\hat{u} - u_{\text{rk4}}\|_2 / \|u_{\text{rk4}}\|_2 = \sqrt{\text{MSE}} / \mathrm{RMS}(u_{\text{rk4}})$. With $\mathrm{RMS}(u_{\text{rk4}}) \approx 0.99$, $\sqrt{0.0049}/0.99 \approx 7.1\%$. By streaming 128,000 fresh trajectories across varied $(l, \alpha)$ and 3-step rollouts in <span class="font-mono">train.py</span>, training and held-out validation errors stay aligned (~7%) without overfitting.
+                </div>
+              </details>
+            </div>
+
+            <div class="viva-item panel-card">
+              <details class="group">
+                <summary class="px-4 py-3 flex items-center justify-between text-xs sm:text-sm font-bold text-slate-900">
+                  <span>2. How does zero-shot super-resolution work at $256^2$ with $k_{\max} = 16$ truncation and no retraining?</span>
+                  <i data-lucide="chevron-down" class="viva-chevron w-4 h-4 text-slate-500 shrink-0"></i>
+                </summary>
+                <div class="px-4 pb-3.5 text-xs text-slate-600 leading-relaxed border-t border-slate-100 pt-2.5">
+                  Each <span class="font-mono">SpectralConv2d</span> layer learns complex weights $R_\phi$ strictly on the continuous low-frequency wave numbers $k \in [-16, 16]^2$ (rather than pixel-grid filters). When evaluated with <span class="font-mono">target_s=(256, 256)</span>, the output spectrum is zero-padded beyond mode 16 and inverted via <span class="font-mono">irfft2</span> onto the denser mesh—evaluating the exact same continuous trigonometric polynomial at 16× higher spatial resolution.
+                </div>
+              </details>
+            </div>
+
+            <div class="viva-item panel-card">
+              <details class="group">
+                <summary class="px-4 py-3 flex items-center justify-between text-xs sm:text-sm font-bold text-slate-900">
+                  <span>3. Why does error increase on Out-Of-Distribution (OOD) flows, and how does TTA reduce it without labels?</span>
+                  <i data-lucide="chevron-down" class="viva-chevron w-4 h-4 text-slate-500 shrink-0"></i>
+                </summary>
+                <div class="px-4 pb-3.5 text-xs text-slate-600 leading-relaxed border-t border-slate-100 pt-2.5">
+                  Analytical flows like Vortex Dipoles and Kelvin-Helmholtz Shear layers lie outside the training Gaussian Random Field ($l=0.50, \alpha=2.50$) distribution. Test-Time Adaptation (TTA) freezes the 4 global Fourier layers and performs a few Adam steps on only the local <span class="font-mono">ProjectionBlock</span> ($64 \to 32 \to 1$) to minimize the exact spectral Navier-Stokes PDE residual over $[\omega_0, u_\theta]$, anchored by $\|u_\theta - u_{\text{base}}\|_2^2$ and mean circulation conservation. Calling <span class="font-mono">restore_weights=True</span> restores the checkpoint weights right after the demo.
+                </div>
+              </details>
+            </div>
+
+            <div class="viva-item panel-card">
+              <details class="group">
+                <summary class="px-4 py-3 flex items-center justify-between text-xs sm:text-sm font-bold text-slate-900">
+                  <span>4. Why is the ~1,000×+ speedup only seen under $256^2$ CFL scaling and not at $64^2$ single-step?</span>
+                  <i data-lucide="chevron-down" class="viva-chevron w-4 h-4 text-slate-500 shrink-0"></i>
+                </summary>
+                <div class="px-4 pb-3.5 text-xs text-slate-600 leading-relaxed border-t border-slate-100 pt-2.5">
+                  Classical explicit RK4 time-stepping is governed by the Courant–Friedrichs–Lewy (CFL) stability criterion $\Delta t \propto \Delta x$, forcing 4× more sequential time steps at $256^2$ than at $64^2$, with each step paying $O(N^2 \log N)$ FFT cost. By contrast, PINO maps $t=0 \to T$ in a single $O(1)$ forward pass. Therefore, while $64^2$ single-step speedups are modest (tens of $\times$), the speedup factor grows dramatically into the hundreds or ~1,000×+ regime at $256^2$ under CFL scaling.
+                </div>
+              </details>
+            </div>
+
+            <div class="viva-item panel-card">
+              <details class="group">
+                <summary class="px-4 py-3 flex items-center justify-between text-xs sm:text-sm font-bold text-slate-900">
+                  <span>5. How does PINO enable real-time Active Flow Control with Particle Swarm Optimization?</span>
+                  <i data-lucide="chevron-down" class="viva-chevron w-4 h-4 text-slate-500 shrink-0"></i>
+                </summary>
+                <div class="px-4 pb-3.5 text-xs text-slate-600 leading-relaxed border-t border-slate-100 pt-2.5">
+                  Optimizing a 4,096-dimensional forcing field $f(x, y)$ inside an iterative PSO swarm requires hundreds of PDE evaluations. Running a sequential RK4 solver inside every particle update would take tens of seconds or minutes. Wrapping PINO inside <span class="font-mono">PSOSurrogateHarness</span> batches all $N_{\text{particles}}$ perturbations simultaneously on GPU/MPS, enforcing the actuator bound $\|f\|_\infty \le B$ and minimizing terminal enstrophy $\frac{1}{2}\langle \omega^2 \rangle$ in well under a second.
+                </div>
+              </details>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- FOOTER -->
+  <footer class="border-t border-slate-200 py-4 bg-slate-50 text-center text-xs text-slate-500">
+    Physics-Informed Neural Operator (PINO) • Continuous 2D Navier-Stokes Scientific Studio • Swiss Light Mode
+  </footer>
+
+  <!-- TOAST NOTIFICATION -->
+  <div id="toastNotification" class="toast-banner" role="status" aria-live="polite">
+    <i data-lucide="check-circle-2" class="w-4 h-4 text-emerald-600 shrink-0"></i>
+    <span id="toastMessage">Action completed</span>
+  </div>
+
+  <!-- APPLICATION LOGIC -->
+  <script src="app.js"></script>
+</body>
+</html>

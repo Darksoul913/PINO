@@ -4,6 +4,7 @@ Demonstrates Zero-Shot Super-Resolution, RK4 Reference Solver, Test-Time Adaptat
 and PSO Surrogate Optimization throughput.
 """
 
+import os
 import time
 import torch
 
@@ -43,10 +44,16 @@ def run_pino_demo():
     # 3. PINO Model Forward Pass & Zero-Shot Super-Resolution
     print("--- STEP 3: PINO Model & Zero-Shot Super-Resolution (64x64 -> 256x256) ---")
     model = PINO2D.from_config(config.model).to(device)
+    checkpoint_path = "checkpoints/pino_best.pt"
+    if os.path.exists(checkpoint_path):
+        checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+        model.load_state_dict(checkpoint["model_state_dict"])
+        print(f"  Loaded trained checkpoint from '{checkpoint_path}' (Rel-L2: {checkpoint.get('loss', 0.0)*100:.2f}%)")
+    model.eval()
 
-    # Prepare 64x64 grid input
-    x = torch.linspace(0, 2 * 3.141592653589793 * (s_x - 1) / s_x, s_x, device=device)
-    y = torch.linspace(0, 2 * 3.141592653589793 * (s_y - 1) / s_y, s_y, device=device)
+    # Prepare 64x64 grid input normalized to [0, 1]
+    x = torch.linspace(0, (s_x - 1) / s_x, s_x, device=device)
+    y = torch.linspace(0, (s_y - 1) / s_y, s_y, device=device)
     grid_x, grid_y = torch.meshgrid(x, y, indexing="ij")
     x_input = torch.cat([grid_x.unsqueeze(0), grid_y.unsqueeze(0), w0], dim=0).unsqueeze(0).to(device)  # (1, 3, 64, 64)
 

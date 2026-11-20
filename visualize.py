@@ -64,8 +64,12 @@ def visualize_pino_fields(
     u_super_res = u_super_res_tensor[0, 0].cpu().numpy()
     a_init = w0[0].cpu().numpy()
 
-    # 5. Compute Absolute Error Heatmap
+    # 5. Compute Absolute Error Heatmap & Shared Colorbar Bounds (Panels 2-4)
     abs_error = np.abs(u_pino - u_rk4)
+    vmax = float(max(abs(u_rk4).max(), abs(u_pino).max(), abs(u_super_res).max()))
+    if vmax == 0.0:
+        vmax = 1e-8
+    vmin = -vmax
 
     # 6. Plotting 1x5 Figure Panel
     fig, axes = plt.subplots(1, 5, figsize=(22, 4.5), dpi=300)
@@ -77,17 +81,17 @@ def visualize_pino_fields(
     fig.colorbar(im0, ax=axes[0], fraction=0.046, pad=0.04)
 
     # Panel 2: RK4 Reference Solver
-    im1 = axes[1].imshow(u_rk4, cmap="twilight", origin="lower")
+    im1 = axes[1].imshow(u_rk4, cmap="twilight", origin="lower", vmin=vmin, vmax=vmax)
     axes[1].set_title("RK4 Solver $u_{rk4}(t)$\n($64 \\times 64$)", fontsize=11, fontweight="bold")
     fig.colorbar(im1, ax=axes[1], fraction=0.046, pad=0.04)
 
     # Panel 3: PINO Output (Standard)
-    im2 = axes[2].imshow(u_pino, cmap="twilight", origin="lower")
+    im2 = axes[2].imshow(u_pino, cmap="twilight", origin="lower", vmin=vmin, vmax=vmax)
     axes[2].set_title("PINO Output $u_{pino}(t)$\n($64 \\times 64$)", fontsize=11, fontweight="bold")
     fig.colorbar(im2, ax=axes[2], fraction=0.046, pad=0.04)
 
     # Panel 4: PINO Zero-Shot Super-Resolution
-    im3 = axes[3].imshow(u_super_res, cmap="twilight", origin="lower")
+    im3 = axes[3].imshow(u_super_res, cmap="twilight", origin="lower", vmin=vmin, vmax=vmax)
     axes[3].set_title("Zero-Shot Super-Res\n($256 \\times 256$)", fontsize=11, fontweight="bold")
     fig.colorbar(im3, ax=axes[3], fraction=0.046, pad=0.04)
 

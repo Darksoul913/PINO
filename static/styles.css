@@ -1,0 +1,531 @@
+/* ==========================================================================
+   PINO Scientific Studio — Motion-Designed Swiss Light Mode Stylesheet
+   Palette: #FFFFFF bg | #F8FAFC surface | #0F172A ink | #2563EB cobalt | #059669 emerald
+   ========================================================================== */
+
+:root {
+  --bg-page: #FFFFFF;
+  --bg-sidebar: #F8FAFC;
+  --text-primary: #0F172A;
+  --text-secondary: #475569;
+  --accent-blue: #2563EB;
+  --accent-cyan: #0EA5E9;
+  --accent-emerald: #059669;
+  --border-hairline: #E2E8F0;
+  --ease-spring: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+html,
+body {
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  background-color: var(--bg-page);
+  background-image: radial-gradient(ellipse 85% 42% at 50% -6%, rgba(37, 99, 235, 0.055), transparent 70%);
+  background-repeat: no-repeat;
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3,
+.studio-heading {
+  font-family: "Plus Jakarta Sans", "Inter", -apple-system, sans-serif;
+}
+
+.font-mono,
+code,
+pre {
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Header Glass & Animated Fluid Wave Canvas */
+.studio-header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.88);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border-hairline);
+}
+
+.header-flow-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  opacity: 0.55;
+}
+
+.brand-mark {
+  position: relative;
+  overflow: hidden;
+  transition: transform 0.25s var(--ease-spring), box-shadow 0.25s ease;
+}
+
+.brand-mark::after {
+  content: "";
+  position: absolute;
+  inset: -40%;
+  background: conic-gradient(from 0deg, transparent 0 240deg, rgba(255, 255, 255, 0.38) 300deg, transparent 360deg);
+  animation: brandSweep 6s linear infinite;
+}
+
+.brand-mark:hover {
+  transform: translateY(-1px) scale(1.03);
+  box-shadow: 0 8px 18px -6px rgba(37, 99, 235, 0.45);
+}
+
+@keyframes brandSweep {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Tactile Buttons */
+button {
+  transition: transform 0.14s var(--ease-spring), background-color 0.16s ease, border-color 0.16s ease, box-shadow 0.18s ease, color 0.16s ease;
+}
+
+button:active:not(:disabled) {
+  transform: scale(0.975);
+}
+
+/* Cards & Surfaces */
+.metric-card {
+  position: relative;
+  background: #FFFFFF;
+  border: 1px solid var(--border-hairline);
+  border-radius: 14px;
+  padding: 16px 18px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  transition: transform 0.22s var(--ease-spring), border-color 0.2s ease, box-shadow 0.22s ease;
+}
+
+.metric-card:hover {
+  transform: translateY(-2px);
+  border-color: #CBD5E1;
+  box-shadow: 0 10px 24px -12px rgba(15, 23, 42, 0.12);
+}
+
+.metric-card.card-flash {
+  animation: cardFlash 0.65s var(--ease-spring);
+}
+
+@keyframes cardFlash {
+  0% {
+    border-color: #60A5FA;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18), 0 8px 20px -8px rgba(37, 99, 235, 0.2);
+  }
+  100% {
+    border-color: var(--border-hairline);
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  }
+}
+
+.panel-card {
+  position: relative;
+  background: #FFFFFF;
+  border: 1px solid var(--border-hairline);
+  border-radius: 14px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+  transition: border-color 0.2s ease, box-shadow 0.22s ease;
+}
+
+.panel-card:hover {
+  border-color: #CBD5E1;
+}
+
+.control-card {
+  background: var(--bg-sidebar);
+  border: 1px solid var(--border-hairline);
+  border-radius: 14px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+/* Sliding Shared-Layout Tab Navigation */
+.tab-bar {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 5px;
+  background: #F8FAFC;
+  border: 1px solid var(--border-hairline);
+  border-radius: 14px;
+}
+
+.tab-slider-pill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 1;
+  border-radius: 10px;
+  background: #FFFFFF;
+  border: 1px solid #BFDBFE;
+  box-shadow: 0 2px 8px -2px rgba(37, 99, 235, 0.16), 0 1px 2px rgba(15, 23, 42, 0.04);
+  pointer-events: none;
+  transition: transform 0.36s var(--ease-spring), width 0.36s var(--ease-spring), height 0.28s var(--ease-spring), opacity 0.2s ease;
+  opacity: 0;
+}
+
+.tab-btn {
+  position: relative;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 14px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: #64748B;
+  border-radius: 10px;
+  transition: color 0.18s ease, transform 0.14s var(--ease-spring);
+  white-space: nowrap;
+}
+
+.tab-btn:hover {
+  color: var(--text-primary);
+}
+
+.tab-btn.active {
+  color: var(--accent-blue);
+  font-weight: 700;
+}
+
+/* Staggered Tab Content Entrance */
+.tab-content.is-entering > * {
+  animation: studioReveal 0.42s var(--ease-spring) both;
+}
+
+.tab-content.is-entering > *:nth-child(1) { animation-delay: 0ms; }
+.tab-content.is-entering > *:nth-child(2) { animation-delay: 45ms; }
+.tab-content.is-entering > *:nth-child(3) { animation-delay: 90ms; }
+.tab-content.is-entering > *:nth-child(4) { animation-delay: 135ms; }
+.tab-content.is-entering > *:nth-child(5) { animation-delay: 180ms; }
+.tab-content.is-entering > *:nth-child(6) { animation-delay: 225ms; }
+
+@keyframes studioReveal {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.994);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Spectral Scan-Line Loading Shimmer */
+.is-loading-surface {
+  position: relative;
+  overflow: hidden;
+}
+
+.is-loading-surface::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
+  background: linear-gradient(
+    110deg,
+    rgba(255, 255, 255, 0) 20%,
+    rgba(239, 246, 255, 0.72) 45%,
+    rgba(191, 219, 254, 0.35) 50%,
+    rgba(239, 246, 255, 0.72) 55%,
+    rgba(255, 255, 255, 0) 80%
+  );
+  transform: translateX(-100%);
+  animation: spectralSweep 1.15s ease-in-out infinite;
+}
+
+@keyframes spectralSweep {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+/* Sliders */
+input[type="range"] {
+  accent-color: var(--accent-blue);
+}
+
+/* Plot Stages */
+.plot-stage {
+  height: 360px;
+  width: 100%;
+}
+
+.plot-stage-sm {
+  height: 300px;
+  width: 100%;
+}
+
+.plot-stage-lg {
+  height: 440px;
+  width: 100%;
+}
+
+/* Live 60 FPS Particle Advection Canvas */
+.particle-stage-wrap {
+  position: relative;
+  width: 100%;
+  max-width: 390px;
+  aspect-ratio: 1 / 1;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid #CBD5E1;
+  background: #F8FAFC;
+  box-shadow: inset 0 1px 3px rgba(15, 23, 42, 0.06);
+}
+
+#particleFlowCanvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* Draggable Split-Screen Wipe Comparator */
+.wipe-stage {
+  position: relative;
+  width: 100%;
+  max-width: 440px;
+  aspect-ratio: 1 / 1;
+  margin: 0 auto;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid #CBD5E1;
+  background: #F8FAFC;
+  cursor: ew-resize;
+  user-select: none;
+  touch-action: none;
+  box-shadow: 0 4px 14px -6px rgba(15, 23, 42, 0.14);
+}
+
+.wipe-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.wipe-overlay-layer {
+  position: absolute;
+  inset: 0;
+  clip-path: inset(0 50% 0 0);
+  pointer-events: none;
+}
+
+.wipe-divider {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  background: #0F172A;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.85);
+  transform: translateX(-50%);
+  pointer-events: none;
+  z-index: 6;
+}
+
+.wipe-thumb {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 34px;
+  height: 34px;
+  border-radius: 9999px;
+  background: #FFFFFF;
+  border: 2px solid #2563EB;
+  color: #2563EB;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.22);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.wipe-badge {
+  position: absolute;
+  top: 10px;
+  z-index: 5;
+  padding: 3px 9px;
+  border-radius: 9999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  font-family: "JetBrains Mono", monospace;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid #E2E8F0;
+  color: #0F172A;
+  backdrop-filter: blur(4px);
+  pointer-events: none;
+}
+
+.wipe-badge-left { left: 10px; }
+.wipe-badge-right { right: 10px; color: #1D4ED8; border-color: #BFDBFE; }
+
+/* Animated SVG Architecture Dataflow */
+.arch-flow-wire {
+  stroke-dasharray: 6 5;
+  animation: archDashFlow 1.4s linear infinite;
+}
+
+.arch-tta-halo {
+  stroke-dasharray: 5 4;
+  animation: archDashFlow 2.2s linear infinite;
+}
+
+.arch-mode-cell {
+  animation: modeTwinkle 2.6s ease-in-out infinite alternate;
+}
+
+.arch-mode-cell:nth-child(2n) { animation-delay: 0.4s; }
+.arch-mode-cell:nth-child(3n) { animation-delay: 0.8s; }
+.arch-mode-cell:nth-child(5n) { animation-delay: 1.2s; }
+
+@keyframes archDashFlow {
+  to {
+    stroke-dashoffset: -22;
+  }
+}
+
+@keyframes modeTwinkle {
+  0% { opacity: 0.35; }
+  100% { opacity: 0.95; }
+}
+
+/* Presentation Mode (Smooth Transition) */
+#sidebarPanel {
+  transition: opacity 0.26s ease, transform 0.28s var(--ease-spring);
+}
+
+#mainContent {
+  transition: all 0.28s var(--ease-spring);
+}
+
+body.presentation-mode #sidebarPanel {
+  display: none;
+}
+
+body.presentation-mode #mainContent {
+  grid-column: span 12 / span 12;
+}
+
+body.presentation-mode .plot-stage {
+  height: 440px;
+}
+
+body.presentation-mode .plot-stage-sm {
+  height: 360px;
+}
+
+body.presentation-mode .plot-stage-lg {
+  height: 520px;
+}
+
+body.presentation-mode #presentationModeBtn {
+  background-color: #0F172A;
+  color: #FFFFFF;
+  border-color: #0F172A;
+}
+
+/* Vortex Painter Canvas */
+.vortex-canvas-wrap {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 6px;
+  background: #FFFFFF;
+  border: 1px solid var(--border-hairline);
+  border-radius: 10px;
+}
+
+#vortexCanvas {
+  width: 220px;
+  height: 220px;
+  border-radius: 6px;
+  border: 1px solid #CBD5E1;
+  background-color: #F8FAFC;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+/* Viva / FAQs Accordion */
+.viva-item details summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.viva-item details summary::-webkit-details-marker {
+  display: none;
+}
+
+.viva-item details[open] .viva-chevron {
+  transform: rotate(180deg);
+}
+
+.viva-chevron {
+  transition: transform 0.24s var(--ease-spring);
+}
+
+/* KaTeX Overflow Safety */
+.katex-box {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 6px 2px;
+}
+
+.katex-box .katex {
+  font-size: 0.9em;
+}
+
+.katex-box .katex-display {
+  margin: 0.35em 0;
+}
+
+/* Toast Notification */
+.toast-banner {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border-hairline);
+  background: #FFFFFF;
+  color: var(--text-primary);
+  font-size: 0.75rem;
+  font-weight: 600;
+  box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.12), 0 4px 10px -4px rgba(15, 23, 42, 0.06);
+  opacity: 0;
+  transform: translateY(8px);
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.24s var(--ease-spring);
+}
+
+.toast-banner.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Accessibility: Reduced Motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

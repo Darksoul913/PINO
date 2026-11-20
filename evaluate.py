@@ -48,7 +48,7 @@ def evaluate_pino_metrics(
         checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
         model.load_state_dict(checkpoint["model_state_dict"])
         best_loss_val = checkpoint.get("loss", 0.0)
-        print(f"[*] Successfully loaded trained checkpoint: '{checkpoint_path}' (Training Rel-L2: {best_loss_val * 100:.2f}%)\n")
+        print(f"[*] Successfully loaded trained checkpoint: '{checkpoint_path}' (Saved Checkpoint Metric: {best_loss_val:.4f})\n")
     else:
         print("[!] Warning: No checkpoint found. Evaluating initialized model weights.\n")
 
@@ -96,11 +96,9 @@ def evaluate_pino_metrics(
 
     # 5. Exact PDE Residual Evaluation
     with torch.no_grad():
-        try:
-            pde_res = loss_engine(u_pred_all.unsqueeze(1), w0_all.unsqueeze(1))
-            pde_res_val = pde_res.item() if isinstance(pde_res, torch.Tensor) else float(pde_res)
-        except Exception:
-            pde_res_val = 0.0
+        traj_2step = torch.stack([w0_all, u_pred_all], dim=1)
+        pde_res_tensor = loss_engine.compute_pde_residual(traj_2step, dt=1.0)
+        pde_res_val = float(torch.sqrt(torch.mean(pde_res_tensor ** 2)).item())
 
     # 6. Quantitative Mathematical Metrics Computation
     pred = u_pred_all.cpu().numpy()
